@@ -109,6 +109,19 @@ thr_guard(guard) ==
      guard |-> guard]
 
 (***************************************************************************)
+(* This is a thread, which is a conditional thread.  When such a thread is *)
+(* available in the current state, we we can transition to the             *)
+(* then_thread, if the condition can be evaluated to true, or we can       *)
+(* transition to the else_thread if the condition can evaluated to false.  *)
+(***************************************************************************)
+thr_cond(condition, then_thread, else_thread) ==
+    [type |-> "thread", 
+     subtype |-> "conditional",
+     condition |-> condition,
+     then_thread |-> then_thread,
+     else_thread |-> else_thread]
+
+(***************************************************************************)
 (* This is a thread, which is a composition.  When such a thread in the    *)
 (* current state of a location, the location can perform a transition from *)
 (* either the left-hand side thread, or the right-hand side thread.        *)
@@ -169,6 +182,16 @@ strvar(variable) ==
 \* Expressions == [type: { "expression" }, subtype: { "addition" }, lhs: Expressions, rhs: Expressions]
 
 (***************************************************************************)
+(* Record representing the equality of the two expressions (possibly       *)
+(* recursive, but with final depth).                                       *)
+(***************************************************************************)
+equal(lhs, rhs) ==
+    [type |-> "expression",
+     subtype |-> "equality",
+     lhs |-> lhs,
+     rhs |-> rhs]
+
+(***************************************************************************)
 (* Record representing the addition of the expressions (possibly           *)
 (* recursive, but with final depth).                                       *)
 (***************************************************************************)
@@ -223,13 +246,16 @@ eval(M, expr) ==
                 rhs_literal == eval(M, expr.rhs)
                 \* Hier we do the actual evaluation of the unwrapped values
                 result_value == 
-                    CASE expr.subtype = "addition" -> lhs_literal.value + rhs_literal.value
+                    CASE expr.subtype = "equality" -> lhs_literal.value = rhs_literal.value
+                      [] expr.subtype = "addition" -> lhs_literal.value + rhs_literal.value
                       [] OTHER -> Undefined
                 \* Hier we wrap the evaluated result value again as a literal 
                 evaluate_and_wrap == 
-                    CASE lhs_literal.subtype = rhs_literal.subtype /\ lhs_literal.subtype = "number" -> num(result_value)
+                    CASE result_value = TRUE \/ result_value = FALSE -> [type |-> "literal", value |-> result_value] 
+                      [] lhs_literal.subtype = rhs_literal.subtype /\ lhs_literal.subtype = "number" -> num(result_value)
                       [] lhs_literal.subtype = rhs_literal.subtype /\ lhs_literal.subtype = "string" -> str(result_value)
-                      [] OTHER -> Undefined \* this case happens when the expression combines values of different types!
+                      \* this case happens when the expression combines values of different types!
+                      [] OTHER -> Undefined
             \* Here we return the evaluated and wrapped "literal" record
             IN evaluate_and_wrap
       [] OTHER -> Undefined
@@ -527,6 +553,66 @@ SndNew ==
                             })
 
 (***************************************************************************)
+(* Conditional step for the representation of threads as trees.  This      *)
+(* action encodes the TRUE rule from the operational semantics of the      *)
+(* calculus.  It checks if the expression inside of the conditional thread *)
+(* can be evaluated to TRUE.  If this is the case, it substitues the       *)
+(* conditional thread with its "then" thread in the state of the location. *)
+(***************************************************************************)
+TrueNew == 
+    /\  \E location \in EPC_state : 
+            \E enabled_thread \in DOMAIN location.threads_bag :
+                 \* Check if the thread is a conditional thread
+                 /\ enabled_thread.type = "thread"
+                 /\ enabled_thread.subtype = "conditional"
+                 \* Check if the condition can be evaluated to TRUE
+                 /\ eval(location.mem, enabled_thread.condition) = [type |-> "literal", value |-> TRUE]
+                 /\ EPC_state' = 
+                        \* We remove the current version of the location from the global state
+                        (EPC_state \ { location }) \union 
+                        \* And add it again with the new state
+                        { [location EXCEPT 
+                                \* The state of the process, i.e. the threads running it in stay the same
+                                \* except for the thread, which currently executes the "TRUE" step
+                                !.threads_bag = 
+                                    \* To implement this, we remove the bag with enabled_thread
+                                    (location.threads_bag (-) SetToBag({ enabled_thread }))
+                                    \* And we add the flattened then_thread  
+                                    (+) flatten_thread_compositions(enabled_thread.then_thread)
+                        ]}
+                 /\ UNCHANGED msg_aether
+
+(***************************************************************************)
+(* Conditional step for the representation of threads as trees.  This      *)
+(* action encodes the FALSE rule from the operational semantics of the     *)
+(* calculus.  It checks if the expression inside of the conditional thread *)
+(* can be evaluated to FALSE.  If this is the case, it substitues the      *)
+(* conditional thread with its "else" thread in the state of the location. *)
+(***************************************************************************)
+FalseNew == 
+    /\  \E location \in EPC_state : 
+            \E enabled_thread \in DOMAIN location.threads_bag :
+                 \* Check if the thread is a conditional thread
+                 /\ enabled_thread.type = "thread"
+                 /\ enabled_thread.subtype = "conditional"
+                 \* Check if the condition can be evaluated to FALSE
+                 /\ eval(location.mem, enabled_thread.condition) = [type |-> "literal", value |-> FALSE]
+                 /\ EPC_state' = 
+                        \* We remove the current version of the location from the global state
+                        (EPC_state \ { location }) \union 
+                        \* And add it again with the new state
+                        { [location EXCEPT 
+                                \* The state of the process, i.e. the threads running it in stay the same
+                                \* except for the thread, which currently executes the "TRUE" step
+                                !.threads_bag = 
+                                    \* To implement this, we remove the bag with enabled_thread
+                                    (location.threads_bag (-) SetToBag({ enabled_thread }))
+                                    \* And we add the flattened then_thread  
+                                    (+) flatten_thread_compositions(enabled_thread.else_thread)
+                        ]}
+                 /\ UNCHANGED msg_aether
+
+(***************************************************************************)
 (* All variables, which are used by terms of the calculus, need to be      *)
 (* declared as TLA+ constants.  These variables are records with field     *)
 (* "type" equal to "identifier", and field "name" equal to the string      *)
@@ -731,19 +817,57 @@ as_tree_t10 ==
 as_tree_t10_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t10))
 
 (***************************************************************************)
+(* Simple conditional thread.  Depending on the condition 0 = 0 (which is  *)
+(* always true), the thread can continue as the thread, which declares the *)
+(* variable x in the "then" case, or continue as the thread, which         *)
+(* declares the variable y in the "else" case.                             *)
+(***************************************************************************)
+as_tree_t11 ==
+    thr_cond(
+        equal(num(0), num(0)),
+        thr_guard(prefix(var(x),
+            thr_guard(Nil)
+        )),
+        thr_guard(prefix(var(y),
+            thr_guard(Nil)
+        ))
+    )
+
+as_tree_t11_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t11))
+
+(***************************************************************************)
+(* Simple conditional thread.  Depending on the condition 0 = 1 (which is  *)
+(* always false), the thread can continue as the thread, which declares    *)
+(* the variable x in the "then" case, or continue as the thread, which     *)
+(* declares the variable y in the "else" case.                             *)
+(***************************************************************************)
+as_tree_t12 ==
+    thr_cond(
+        equal(num(0), num(1)),
+        thr_guard(prefix(var(x),
+            thr_guard(Nil)
+        )),
+        thr_guard(prefix(var(y),
+            thr_guard(Nil)
+        ))
+    )
+
+as_tree_t12_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t12))
+
+(***************************************************************************)
 (* The initial state formula, which composes the initial state of the      *)
 (* system (declared in the calculus).                                      *)
 (***************************************************************************)
-Init == /\ EPC_state = { as_tree_t10_loc_0 }
+Init == /\ EPC_state = { as_tree_t12_loc_0 }
         /\ msg_aether = SetToBag({})
 
 (***************************************************************************)
 (* The next state relation, which simply states that the next states are   *)
 (* generated by the rules of the operational semantics of the calculus.    *)
 (***************************************************************************)
-Next == DeclNew \/ AssignNew \/ RcvNew \/ SndNew
+Next == DeclNew \/ AssignNew \/ RcvNew \/ SndNew \/ TrueNew \/ FalseNew
 
 =============================================================================
 \* Modification History
-\* Last modified Sun Aug 10 15:06:58 CEST 2025 by todormoskov
+\* Last modified Sun Aug 10 16:47:17 CEST 2025 by todormoskov
 \* Created Mon Aug 04 15:06:46 CEST 2025 by todormoskov
