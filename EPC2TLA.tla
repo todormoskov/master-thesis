@@ -7,7 +7,7 @@ CONSTANTS LocationSet
 
 CONSTANTS Undefined, Initialized
 
-VARIABLES EPC_state, msg_aether
+VARIABLES EPC_state, msg_aether, thr_defs
 
 \* EPC_mem == [LocationSet -> [Variables -> Values]]
 \* EPC_state == [Location |-> ]
@@ -107,6 +107,38 @@ thr_guard(guard) ==
     [type |-> "thread", 
      subtype |-> "guard",
      guard |-> guard]
+
+(***************************************************************************)
+(* Records that represent a "defining equation" for a thread.  These       *)
+(* records contain the thread name, list with free variables (occuring in  *)
+(* the thread) and the body of the thread.  Such definitions can be        *)
+(* provided and later referenced from the body of other guards or threads, *)
+(* part of a term of the calculus.                                         *)
+(***************************************************************************)
+thr_ident_def(name, free_vars, thr_body) ==
+    [type |-> "definition",
+     subtype |-> "thread",
+     name |-> name,
+     free_vars |-> free_vars,
+     thr_body |-> thr_body]
+
+(***************************************************************************)
+(* This is a thread identifier, which points to one of the threads from    *)
+(* the thread definitions (the variable thr_defs, which is also part of    *)
+(* the state).  We can write the so called "defining equations", which     *)
+(* assosicate a thread identifier (which itself is a record with fields    *)
+(* "type", "subtype", "name", "free_vars") with a thread ("thr_body",      *)
+(* which is given as the AST of records), and allows the programmer to     *)
+(* reference a defined thread from other guards or threads.                *)
+(*                                                                         *)
+(* When such a thread is available in the current state, we can substitue  *)
+(* the identifier with the thread body, as defined in the defining         *)
+(* equation.                                                               *)
+(***************************************************************************)
+thr_ident(thr_identifier) ==
+    [type |-> "thread", 
+     subtype |-> "identifier",
+     thr_identifier |-> thr_identifier]
 
 (***************************************************************************)
 (* This is a thread, which is a conditional thread.  When such a thread is *)
@@ -368,7 +400,7 @@ DeclNew ==
                                     \* And we add the guarded thread flattened 
                                     (+) flatten_thread_compositions(enabled_thread.guard.thread)
                         ]}
-                 /\ UNCHANGED msg_aether
+                 /\ UNCHANGED << msg_aether, thr_defs >>
 
 (***************************************************************************)
 (* Assign action for the representation of threads as trees.  The action   *)
@@ -411,7 +443,7 @@ AssignNew ==
                                     \* And we add the guarded thread flattened 
                                     (+) flatten_thread_compositions(enabled_thread.guard.thread)
                         ]}
-                 /\ UNCHANGED msg_aether
+                 /\ UNCHANGED << msg_aether, thr_defs >>
 
 (***************************************************************************)
 (* Receive action for the representation of threads as trees.  The action  *)
@@ -468,6 +500,7 @@ RcvNew ==
                                         (+) flatten_thread_compositions(enabled_thread.guard.thread)
                             ]}
                     /\ msg_aether' = msg_aether (-) SetToBag({ matching_msg })
+                    /\ UNCHANGED thr_defs
 
 (***************************************************************************)
 (* Send action for the representation of threads as trees.  The action     *)
@@ -551,6 +584,7 @@ SndNew ==
                                     eval(location.mem, outgoing_msg.value)
                                 ) 
                             })
+                    /\ UNCHANGED thr_defs
 
 (***************************************************************************)
 (* Conditional step for the representation of threads as trees.  This      *)
@@ -580,7 +614,7 @@ TrueNew ==
                                     \* And we add the flattened then_thread  
                                     (+) flatten_thread_compositions(enabled_thread.then_thread)
                         ]}
-                 /\ UNCHANGED msg_aether
+                 /\ UNCHANGED << msg_aether, thr_defs >>
 
 (***************************************************************************)
 (* Conditional step for the representation of threads as trees.  This      *)
@@ -610,7 +644,43 @@ FalseNew ==
                                     \* And we add the flattened then_thread  
                                     (+) flatten_thread_compositions(enabled_thread.else_thread)
                         ]}
-                 /\ UNCHANGED msg_aether
+                 /\ UNCHANGED << msg_aether, thr_defs >>
+
+(***************************************************************************)
+(* Indetifier step for the representation of threads as trees.  This       *)
+(* action encodes the IDENT rule from the operational semantics of the     *)
+(* calculus.  It checks if there is a defining equation for the identifier *)
+(* in the thr_defs variable, and if there is, it simply substitues the     *)
+(* found identiefier with the body, provided in the definition.  The       *)
+(* variables are dynamically captured.                                     *)
+(***************************************************************************)
+IdentNew == 
+    /\  \E location \in EPC_state : 
+            \E enabled_thread \in DOMAIN location.threads_bag :
+                 \* Check if the thread is a conditional thread
+                 /\ enabled_thread.type = "thread"
+                 /\ enabled_thread.subtype = "identifier"
+                 \* Check if the identifier is defined in thr_def
+                 /\ \E thr_def \in thr_defs : 
+                        /\ enabled_thread.thr_identifier = thr_def.name
+                        \* Check if all free variables of the defined thread are defined in the memory of the location
+                        /\ \A idx \in 1..Len(thr_def.free_vars) : location.mem[thr_def.free_vars[idx]] # Undefined
+                        /\ EPC_state' = 
+                               \* We remove the current version of the location from the global state
+                               (EPC_state \ { location }) \union 
+                               \* And add it again with the new state
+                               { [location EXCEPT 
+                                       \* The state of the process, i.e. the threads running it in stay the same
+                                       \* except for the thread, which currently executes the "TRUE" step
+                                       !.threads_bag = 
+                                           \* To implement this, we remove the bag with enabled_thread
+                                           (location.threads_bag (-) SetToBag({ enabled_thread }))
+                                           \* We wrap the thread body, which itself is a guard,
+                                           \* in a thread of type guard 
+                                           \* and add it to the threads of the location
+                                           (+) SetToBag({ thr_guard(thr_def.thr_body) })
+                               ]}
+                        /\ UNCHANGED << msg_aether, thr_defs >>
 
 (***************************************************************************)
 (* All variables, which are used by terms of the calculus, need to be      *)
@@ -630,6 +700,13 @@ CONSTANTS x, y, z
 (***************************************************************************)
 CONSTANTS c
 
+(***************************************************************************)
+(* The thread identifiers, which are defined for use in the calculus, are  *)
+(* also declared as TLA+ constants.  These thread identifiers are records  *)
+(* with field "type" equal to "identifier", and field "name" equal to the  *)
+(* string representation of the thread identifier symbol.                  *)
+(***************************************************************************)
+CONSTANTS L
 
 (***************************************************************************)
 (* Some small examples, which show the "syntax" of the encoding of the     *)
@@ -855,19 +932,78 @@ as_tree_t12 ==
 as_tree_t12_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t12))
 
 (***************************************************************************)
+(* Simple thread identifier definition.  For the definition, we need to    *)
+(* provide the name of the defined thread, we need to declare its free     *)
+(* variables and we need to define its body.                               *)
+(*                                                                         *)
+(* In this simple case, the list with free variables is empty and from the *)
+(* thread body, we simply declare a new variable x and then halt.          *)
+(***************************************************************************)
+as_tree_simple_thr_def ==
+    thr_ident_def(
+        L,
+        <<>>,
+        prefix(var(x),
+            thr_guard(Nil)
+        )
+    )
+
+(***************************************************************************)
+(* Thread that simply instatiates a thread, given by an thread identifier. *)
+(***************************************************************************)
+as_tree_t13 ==
+    thr_ident(L)
+
+as_tree_t13_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t13))
+
+(***************************************************************************)
+(* Simple thread identifier definition.  For the definition, we need to    *)
+(* provide the name of the defined thread, we need to declare its free     *)
+(* variables and we need to define its body.                               *)
+(*                                                                         *)
+(* In this simple case, the list with free variables contains only x and   *)
+(* from the thread body, we simply assgin the value 10 to the variable x   *)
+(* and then halt.                                                          *)
+(***************************************************************************)
+as_tree_thr_def_that_changes_var ==
+    thr_ident_def(
+        L,
+        <<x>>,
+        prefix(assign(x, num(10)),
+            thr_guard(Nil)
+        )
+    )
+
+(***************************************************************************)
+(* Thread that declares a variable x and then instatiates another thread,  *)
+(* given by an thread identifier, which assigns the value 10 to the        *)
+(* variable x.                                                             *)
+(***************************************************************************)
+as_tree_t14 ==
+    thr_guard(
+        prefix(
+            var(x),
+            thr_ident(L)
+        )
+    )
+
+as_tree_t14_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t14))
+
+(***************************************************************************)
 (* The initial state formula, which composes the initial state of the      *)
 (* system (declared in the calculus).                                      *)
 (***************************************************************************)
-Init == /\ EPC_state = { as_tree_t12_loc_0 }
+Init == /\ EPC_state = { as_tree_t14_loc_0 }
         /\ msg_aether = SetToBag({})
+        /\ thr_defs = { as_tree_thr_def_that_changes_var }
 
 (***************************************************************************)
 (* The next state relation, which simply states that the next states are   *)
 (* generated by the rules of the operational semantics of the calculus.    *)
 (***************************************************************************)
-Next == DeclNew \/ AssignNew \/ RcvNew \/ SndNew \/ TrueNew \/ FalseNew
+Next == DeclNew \/ AssignNew \/ RcvNew \/ SndNew \/ TrueNew \/ FalseNew \/ IdentNew
 
 =============================================================================
 \* Modification History
-\* Last modified Sun Aug 10 16:47:17 CEST 2025 by todormoskov
+\* Last modified Sun Aug 10 19:02:19 CEST 2025 by todormoskov
 \* Created Mon Aug 04 15:06:46 CEST 2025 by todormoskov
