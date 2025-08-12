@@ -3,24 +3,18 @@ EXTENDS Integers, Sequences, Bags
 
 CONSTANTS Variables, Locations, Channels
 
-CONSTANTS LocationSet
-
 CONSTANTS Undefined, Initialized
 
-VARIABLES EPC_state, msg_aether, thr_defs
+VARIABLES loc_network, msg_aether, thr_defs
 
-\* EPC_mem == [LocationSet -> [Variables -> Values]]
-\* EPC_state == [Location |-> ]
+VARIABLES trim, failed_locs
+
+vars == << loc_network, msg_aether, thr_defs, trim, failed_locs >>
+
+\* EPC_mem == [Locations -> [Variables -> Values]]
+\* loc_network == [Location |-> ]
 \* VARIABLES network
 \* TypeOK == network \in [locations |-> ] 
-
-(***************************************************************************)
-(* Records representing channels.  These are used for communication        *)
-(* between locations.                                                      *)
-(***************************************************************************)
-chan(name) ==
-    [type |-> "channel", 
-     name |-> name]
 
 (***************************************************************************)
 (* Records representing an outgoing message.  These are the messages that  *)
@@ -172,7 +166,7 @@ thr_compN(index_set, body) ==
 
 (***************************************************************************)
 (* This is a location.  It is named, it has a memory and access to a       *)
-(* thread.  The transitions it can perform are exactly the transition,     *)
+(* thread.  The transitions it can perform are exactly the transitions,    *)
 (* which the thread can perform.                                           *)
 (***************************************************************************)
 \* loc_state is a set of lists of prefixes
@@ -188,6 +182,10 @@ loc(id, mem, threads_bag) ==
 (* the values themselves, TLC will optimize them (as ints or strings) and  *)
 (* will throws an error if we try to compare these value to records.       *)
 (***************************************************************************)
+lit(value) ==
+    [type |-> "literal",
+     value |-> value]
+
 num(value) ==
     [type |-> "literal",
      subtype |-> "number",
@@ -209,6 +207,15 @@ strvar(variable) ==
      subtype |-> "string",
      variable |-> variable]
 
+(***************************************************************************)
+(* Records for the storing of identifiers.  We need these, because if we   *)
+(* use the values themselves, TLC will optimize them (as ints or strings)  *)
+(* and will throws an error if we try to compare these value to records.   *)
+(***************************************************************************)
+ident(name) ==
+    [type |-> "identifier",
+     name |-> name]
+
 \* https://groups.google.com/g/tlaplus/c/YYI2yRyctwI
 \* RECURSIVE Expressions
 \* Expressions == [type: { "expression" }, subtype: { "addition" }, lhs: Expressions, rhs: Expressions]
@@ -220,6 +227,46 @@ strvar(variable) ==
 equal(lhs, rhs) ==
     [type |-> "expression",
      subtype |-> "equality",
+     lhs |-> lhs,
+     rhs |-> rhs]
+
+(***************************************************************************)
+(* Record representing the "less than" relation of the two expressions     *)
+(* (possibly recursive, but with final depth).                             *)
+(***************************************************************************)
+lt(lhs, rhs) ==
+    [type |-> "expression",
+     subtype |-> "lt",
+     lhs |-> lhs,
+     rhs |-> rhs]
+
+(***************************************************************************)
+(* Record representing the "greater than" relation of the two expressions  *)
+(* (possibly recursive, but with final depth).                             *)
+(***************************************************************************)
+gt(lhs, rhs) ==
+    [type |-> "expression",
+     subtype |-> "gt",
+     lhs |-> lhs,
+     rhs |-> rhs]
+
+(***************************************************************************)
+(* Record representing the "less than or equal" relation of the two        *)
+(* expressions (possibly recursive, but with final depth).                 *)
+(***************************************************************************)
+leq(lhs, rhs) ==
+    [type |-> "expression",
+     subtype |-> "leq",
+     lhs |-> lhs,
+     rhs |-> rhs]
+
+(***************************************************************************)
+(* Record representing the "greater than or equal" relation of the two     *)
+(* expressions (possibly recursive, but with final depth).                 *)
+(***************************************************************************)
+geq(lhs, rhs) ==
+    [type |-> "expression",
+     subtype |-> "geq",
      lhs |-> lhs,
      rhs |-> rhs]
 
@@ -278,18 +325,15 @@ eval(M, expr) ==
                 rhs_literal == eval(M, expr.rhs)
                 \* Hier we do the actual evaluation of the unwrapped values
                 result_value == 
-                    CASE expr.subtype = "equality" -> lhs_literal.value = rhs_literal.value
-                      [] expr.subtype = "addition" -> lhs_literal.value + rhs_literal.value
-                      [] OTHER -> Undefined
-                \* Hier we wrap the evaluated result value again as a literal 
-                evaluate_and_wrap == 
-                    CASE result_value = TRUE \/ result_value = FALSE -> [type |-> "literal", value |-> result_value] 
-                      [] lhs_literal.subtype = rhs_literal.subtype /\ lhs_literal.subtype = "number" -> num(result_value)
-                      [] lhs_literal.subtype = rhs_literal.subtype /\ lhs_literal.subtype = "string" -> str(result_value)
-                      \* this case happens when the expression combines values of different types!
+                    CASE expr.subtype = "equality"  -> lhs_literal.value = rhs_literal.value
+                      [] expr.subtype = "lt"        -> lhs_literal.value < rhs_literal.value
+                      [] expr.subtype = "gt"        -> lhs_literal.value > rhs_literal.value
+                      [] expr.subtype = "leq"       -> lhs_literal.value <= rhs_literal.value
+                      [] expr.subtype = "geq"       -> lhs_literal.value >= rhs_literal.value
+                      [] expr.subtype = "addition"  -> lhs_literal.value + rhs_literal.value
                       [] OTHER -> Undefined
             \* Here we return the evaluated and wrapped "literal" record
-            IN evaluate_and_wrap
+            IN lit(result_value)
       [] OTHER -> Undefined
 
 (***************************************************************************)
@@ -299,15 +343,15 @@ eval(M, expr) ==
 (* as part of its enabling condition.  If this is the case, it updates the *)
 (* memory with the variable set to initialized.                            *)
 (***************************************************************************)
-Decl == 
-    /\  \E location \in EPC_state : 
+Decl_ListVersion == 
+    /\  \E location \in loc_network : 
             \E action_seq \in location.state :
                  /\ Head(action_seq).type = "action"
                  /\ Head(action_seq).subtype = "var"
                  /\ location.mem[Head(action_seq).var_name] = Undefined
-                 /\ EPC_state' = 
+                 /\ loc_network' = 
                         \* We remove the current version of the location from the global state
-                        (EPC_state \ { location }) \union 
+                        (loc_network \ { location }) \union 
                         \* And add it again with the new state
                         { [location EXCEPT 
                                 \* The declared variable is added to the memory and then set to initialized
@@ -326,16 +370,16 @@ Decl ==
 (* value.  Important: it does not write the value, but the value, wrapped  *)
 (* in a "literal" record!                                                  *)
 (***************************************************************************)
-Assign == 
-    /\  \E location \in EPC_state : 
+Assign_ListVersion == 
+    /\  \E location \in loc_network : 
             \E action_seq \in location.state :
                  /\ Head(action_seq).type = "action"
                  /\ Head(action_seq).subtype = "assign"
                  /\ Head(action_seq).lhs \in Variables
                  /\ location.mem[Head(action_seq).lhs] # Undefined
-                 /\ EPC_state' = 
+                 /\ loc_network' = 
                         \* We remove the current version of the location from the global state
-                        (EPC_state \ { location }) \union 
+                        (loc_network \ { location }) \union 
                         \* And add it again with the new state
                         { [location EXCEPT 
                                 \* The declared variable is updated in the memory
@@ -371,9 +415,11 @@ flatten_thread_compositions(thread) ==
 (* as part of its enabling condition.  If this is the case, it updates the *)
 (* memory with the variable set to initialized.                            *)
 (***************************************************************************)
-DeclNew == 
-    /\  \E location \in EPC_state : 
-            \E enabled_thread \in DOMAIN location.threads_bag :
+Decl == 
+    /\  \E location \in loc_network : 
+        /\ trim # Undefined
+        /\ location.id \notin failed_locs
+        /\ \E enabled_thread \in DOMAIN location.threads_bag :
                  \* Check if the thread is a guard
                  /\ enabled_thread.type = "thread"
                  /\ enabled_thread.subtype = "guard"
@@ -385,9 +431,9 @@ DeclNew ==
                  /\ enabled_thread.guard.action.subtype = "var"
                  \* Check if the variable is undefined in the memory
                  /\ location.mem[enabled_thread.guard.action.var_name] = Undefined
-                 /\ EPC_state' = 
+                 /\ loc_network' = 
                         \* We remove the current version of the location from the global state
-                        (EPC_state \ { location }) \union 
+                        (loc_network \ { location }) \union 
                         \* And add it again with the new state
                         { [location EXCEPT 
                                 \* The declared variable is added to the memory and then set to initialized
@@ -400,7 +446,7 @@ DeclNew ==
                                     \* And we add the guarded thread flattened 
                                     (+) flatten_thread_compositions(enabled_thread.guard.thread)
                         ]}
-                 /\ UNCHANGED << msg_aether, thr_defs >>
+                 /\ UNCHANGED << msg_aether, thr_defs, trim, failed_locs >>
 
 (***************************************************************************)
 (* Assign action for the representation of threads as trees.  The action   *)
@@ -412,9 +458,11 @@ DeclNew ==
 (* value.  Important: it does not write the value, but the value, wrapped  *)
 (* in a "literal" record!                                                  *)
 (***************************************************************************)
-AssignNew == 
-    /\  \E location \in EPC_state : 
-            \E enabled_thread \in DOMAIN location.threads_bag :
+Assign == 
+    /\  \E location \in loc_network :
+        /\ trim # Undefined
+        /\ location.id \notin failed_locs
+        /\ \E enabled_thread \in DOMAIN location.threads_bag :
                  \* Check if the thread is a guard
                  /\ enabled_thread.type = "thread"
                  /\ enabled_thread.subtype = "guard"
@@ -428,9 +476,9 @@ AssignNew ==
                  /\ enabled_thread.guard.action.lhs \in Variables
                  \* Check if the variable is already initialized in the memory
                  /\ location.mem[enabled_thread.guard.action.lhs] # Undefined
-                 /\ EPC_state' = 
+                 /\ loc_network' = 
                         \* We remove the current version of the location from the global state
-                        (EPC_state \ { location }) \union 
+                        (loc_network \ { location }) \union 
                         \* And add it again with the new state
                         { [location EXCEPT 
                                 \* The variable is updated in the memory
@@ -443,7 +491,7 @@ AssignNew ==
                                     \* And we add the guarded thread flattened 
                                     (+) flatten_thread_compositions(enabled_thread.guard.thread)
                         ]}
-                 /\ UNCHANGED << msg_aether, thr_defs >>
+                 /\ UNCHANGED << msg_aether, thr_defs, trim, failed_locs >>
 
 (***************************************************************************)
 (* Receive action for the representation of threads as trees.  The action  *)
@@ -463,9 +511,11 @@ AssignNew ==
 (* message.  Additionally, we remove the message from the bag with         *)
 (* messages in transit.                                                    *)
 (***************************************************************************)
-RcvNew == 
-    /\  \E location \in EPC_state : 
-            \E enabled_thread \in DOMAIN location.threads_bag :
+Rcv == 
+    /\  \E location \in loc_network : 
+        /\ trim # Undefined
+        /\ location.id \notin failed_locs
+        /\ \E enabled_thread \in DOMAIN location.threads_bag :
                 \E matching_msg \in DOMAIN msg_aether :
                     \* Check if the thread is a guard
                     /\ enabled_thread.type = "thread"
@@ -484,9 +534,9 @@ RcvNew ==
                     /\ enabled_thread.guard.action.variable \in Variables
                     \* Check if the variable is already initialized in the memory
                     /\ location.mem[enabled_thread.guard.action.variable] # Undefined
-                    /\ EPC_state' = 
+                    /\ loc_network' = 
                             \* We remove the current version of the location from the global state
-                            (EPC_state \ { location }) \union 
+                            (loc_network \ { location }) \union 
                             \* And add it again with the new state
                             { [location EXCEPT 
                                     \* The variable is updated in the memory
@@ -500,7 +550,52 @@ RcvNew ==
                                         (+) flatten_thread_compositions(enabled_thread.guard.thread)
                             ]}
                     /\ msg_aether' = msg_aether (-) SetToBag({ matching_msg })
-                    /\ UNCHANGED thr_defs
+                    /\ UNCHANGED << thr_defs, trim, failed_locs >>
+
+(***************************************************************************)
+(* Suspicion request action for the representation of threads as trees.    *)
+(* The action encodes the L-SUSP rule from the operational semantics of    *)
+(* the calculus.                                                           *)
+(*                                                                         *)
+(* Important: the rule works allows a thread to ignore the reception of a  *)
+(* message by launching of a suspicion for the intended source location of *)
+(* the sender.                                                             *)
+(*                                                                         *)
+(* This rule checks only checks if the location expression can be          *)
+(* evaluated to a location (which should normally be the case) and then    *)
+(* simply ignores the receive action.                                      *)
+(***************************************************************************)
+Susp == 
+    /\  \E location \in loc_network :
+        /\ trim # Undefined
+        /\ location.id \notin failed_locs
+        /\  \E enabled_thread \in DOMAIN location.threads_bag :
+                \* Check if the thread is a guard
+                /\ enabled_thread.type = "thread"
+                /\ enabled_thread.subtype = "guard"
+                \* Check if the guard is a prefix 
+                /\ enabled_thread.guard.type = "guard"
+                /\ enabled_thread.guard.subtype = "prefix"
+                \* Check if the prefix is a receive action
+                /\ enabled_thread.guard.action.type = "action"
+                /\ enabled_thread.guard.action.subtype = "receive"
+                /\ eval(location.mem, enabled_thread.guard.action.location) \in Locations
+                \* The trusted immortal cannot be suspected as failed!
+                /\ eval(location.mem, enabled_thread.guard.action.location) # trim
+                /\ loc_network' = 
+                        \* We remove the current version of the location from the global state
+                        (loc_network \ { location }) \union 
+                        \* And add it again with the new state
+                        { [location EXCEPT 
+                                \* The state of the process, i.e. the threads running it in stay the same
+                                \* except for the thread, which currently "skips" the "rcv" action
+                                !.threads_bag = 
+                                    \* To implement this, we remove the bag with enabled_thread
+                                    (location.threads_bag (-) SetToBag({ enabled_thread }))
+                                    \* And we add the guarded thread flattened 
+                                    (+) flatten_thread_compositions(enabled_thread.guard.thread)
+                        ]}
+                /\ UNCHANGED << msg_aether, thr_defs, trim, failed_locs >>
 
 (***************************************************************************)
 (* Send action for the representation of threads as trees.  The action     *)
@@ -524,9 +619,11 @@ RcvNew ==
 (* outgoing bag becomes empty, we simply remove the whole send action from *)
 (* the thread, executing it.                                               *)
 (***************************************************************************)
-SndNew == 
-    /\  \E location \in EPC_state : 
-            \E enabled_thread \in DOMAIN location.threads_bag :
+Snd == 
+    /\  \E location \in loc_network : 
+        /\ trim # Undefined
+        /\ location.id \notin failed_locs
+        /\ \E enabled_thread \in DOMAIN location.threads_bag :
                 \* Check if the thread is a guard
                 /\ enabled_thread.type = "thread"
                 /\ enabled_thread.subtype = "guard"
@@ -539,9 +636,9 @@ SndNew ==
                 /\ \E outgoing_msg \in DOMAIN enabled_thread.guard.action.msgs :
                     /\ eval(location.mem, outgoing_msg.channel) \in Channels
                     /\ eval(location.mem, outgoing_msg.target) \in Locations
-                    /\ EPC_state' = 
+                    /\ loc_network' = 
                             \* We remove the current version of the location from the global state
-                            (EPC_state \ { location }) \union 
+                            (loc_network \ { location }) \union 
                             \* And add it again with the new state
                             { [location EXCEPT 
                                     \* The state of the process, i.e. the threads running it in stay the same
@@ -579,12 +676,13 @@ SndNew ==
                             SetToBag({ 
                                 msg(
                                     eval(location.mem, outgoing_msg.channel),
-                                    [type |-> "literal", value |-> location.id],
+                                    \* [type |-> "literal", value |-> location.id],
+                                    eval(location.mem, location.id),
                                     eval(location.mem, outgoing_msg.target),
                                     eval(location.mem, outgoing_msg.value)
                                 ) 
                             })
-                    /\ UNCHANGED thr_defs
+                    /\ UNCHANGED << thr_defs, trim, failed_locs >>
 
 (***************************************************************************)
 (* Conditional step for the representation of threads as trees.  This      *)
@@ -593,17 +691,19 @@ SndNew ==
 (* can be evaluated to TRUE.  If this is the case, it substitues the       *)
 (* conditional thread with its "then" thread in the state of the location. *)
 (***************************************************************************)
-TrueNew == 
-    /\  \E location \in EPC_state : 
-            \E enabled_thread \in DOMAIN location.threads_bag :
+True == 
+    /\  \E location \in loc_network : 
+        /\ trim # Undefined
+        /\ location.id \notin failed_locs
+        /\ \E enabled_thread \in DOMAIN location.threads_bag :
                  \* Check if the thread is a conditional thread
                  /\ enabled_thread.type = "thread"
                  /\ enabled_thread.subtype = "conditional"
                  \* Check if the condition can be evaluated to TRUE
                  /\ eval(location.mem, enabled_thread.condition) = [type |-> "literal", value |-> TRUE]
-                 /\ EPC_state' = 
+                 /\ loc_network' = 
                         \* We remove the current version of the location from the global state
-                        (EPC_state \ { location }) \union 
+                        (loc_network \ { location }) \union 
                         \* And add it again with the new state
                         { [location EXCEPT 
                                 \* The state of the process, i.e. the threads running it in stay the same
@@ -614,7 +714,7 @@ TrueNew ==
                                     \* And we add the flattened then_thread  
                                     (+) flatten_thread_compositions(enabled_thread.then_thread)
                         ]}
-                 /\ UNCHANGED << msg_aether, thr_defs >>
+                 /\ UNCHANGED << msg_aether, thr_defs, trim, failed_locs >>
 
 (***************************************************************************)
 (* Conditional step for the representation of threads as trees.  This      *)
@@ -623,40 +723,46 @@ TrueNew ==
 (* can be evaluated to FALSE.  If this is the case, it substitues the      *)
 (* conditional thread with its "else" thread in the state of the location. *)
 (***************************************************************************)
-FalseNew == 
-    /\  \E location \in EPC_state : 
-            \E enabled_thread \in DOMAIN location.threads_bag :
+False == 
+    /\  \E location \in loc_network : 
+        /\ trim # Undefined
+        /\ location.id \notin failed_locs
+        /\ \E enabled_thread \in DOMAIN location.threads_bag :
                  \* Check if the thread is a conditional thread
                  /\ enabled_thread.type = "thread"
                  /\ enabled_thread.subtype = "conditional"
                  \* Check if the condition can be evaluated to FALSE
                  /\ eval(location.mem, enabled_thread.condition) = [type |-> "literal", value |-> FALSE]
-                 /\ EPC_state' = 
+                 /\ loc_network' = 
                         \* We remove the current version of the location from the global state
-                        (EPC_state \ { location }) \union 
+                        (loc_network \ { location }) \union 
                         \* And add it again with the new state
                         { [location EXCEPT 
                                 \* The state of the process, i.e. the threads running it in stay the same
-                                \* except for the thread, which currently executes the "TRUE" step
+                                \* except for the thread, which currently executes the "FALSE" step
                                 !.threads_bag = 
                                     \* To implement this, we remove the bag with enabled_thread
                                     (location.threads_bag (-) SetToBag({ enabled_thread }))
                                     \* And we add the flattened then_thread  
                                     (+) flatten_thread_compositions(enabled_thread.else_thread)
                         ]}
-                 /\ UNCHANGED << msg_aether, thr_defs >>
+                 /\ UNCHANGED << msg_aether, thr_defs, trim, failed_locs >>
 
 (***************************************************************************)
 (* Indetifier step for the representation of threads as trees.  This       *)
 (* action encodes the IDENT rule from the operational semantics of the     *)
 (* calculus.  It checks if there is a defining equation for the identifier *)
-(* in the thr_defs variable, and if there is, it simply substitues the     *)
-(* found identiefier with the body, provided in the definition.  The       *)
-(* variables are dynamically captured.                                     *)
+(* in the thr_defs variable.  If there is a defining equation and all free *)
+(* variables, mentioned in the equation, are defined in the memory of the  *)
+(* location, this action simply substitues the found identifier with the   *)
+(* thread body, provided in the definition.  The check for the free        *)
+(* variables ensures that they are dynamically captured.                   *)
 (***************************************************************************)
-IdentNew == 
-    /\  \E location \in EPC_state : 
-            \E enabled_thread \in DOMAIN location.threads_bag :
+Ident == 
+    /\  \E location \in loc_network : 
+        /\ trim # Undefined
+        /\ location.id \notin failed_locs
+        /\ \E enabled_thread \in DOMAIN location.threads_bag :
                  \* Check if the thread is a conditional thread
                  /\ enabled_thread.type = "thread"
                  /\ enabled_thread.subtype = "identifier"
@@ -665,13 +771,13 @@ IdentNew ==
                         /\ enabled_thread.thr_identifier = thr_def.name
                         \* Check if all free variables of the defined thread are defined in the memory of the location
                         /\ \A idx \in 1..Len(thr_def.free_vars) : location.mem[thr_def.free_vars[idx]] # Undefined
-                        /\ EPC_state' = 
+                        /\ loc_network' = 
                                \* We remove the current version of the location from the global state
-                               (EPC_state \ { location }) \union 
+                               (loc_network \ { location }) \union 
                                \* And add it again with the new state
                                { [location EXCEPT 
                                        \* The state of the process, i.e. the threads running it in stay the same
-                                       \* except for the thread, which currently executes the "TRUE" step
+                                       \* except for the thread, which currently executes the "IDENT" step
                                        !.threads_bag = 
                                            \* To implement this, we remove the bag with enabled_thread
                                            (location.threads_bag (-) SetToBag({ enabled_thread }))
@@ -680,7 +786,32 @@ IdentNew ==
                                            \* and add it to the threads of the location
                                            (+) SetToBag({ thr_guard(thr_def.thr_body) })
                                ]}
-                        /\ UNCHANGED << msg_aether, thr_defs >>
+                        /\ UNCHANGED << msg_aether, thr_defs, trim, failed_locs >>
+
+(***************************************************************************)
+(* This action encodes the TRIM rule from the operational semantics of the *)
+(* calculus.  It checks if the "trusted immortal" for the current          *)
+(* execution is undefined.  If this is the case, it chooses one of the     *)
+(* locations as "trusted immportal" randomly and saves it into the trim    *)
+(* variable.                                                               *)
+(***************************************************************************)
+Trim == 
+    /\ trim = Undefined
+    /\ trim' \in Locations 
+    /\ UNCHANGED << loc_network, msg_aether, thr_defs, failed_locs >>
+
+(***************************************************************************)
+(* This action encodes the FAIL rule from the operational semantics of the *)
+(* calculus.  It checks if the "trusted immortal" has already been chosen  *)
+(* and then picks a new location "k" from the rest of the locations, which *)
+(* have not already failed and are not equal to the trusted immortal, and  *)
+(* adds it to the set of failed locations.                                 *)
+(***************************************************************************)
+Fail == 
+    /\ trim # Undefined
+    /\ \E k \in (Locations \ (failed_locs \union { trim })) :
+        /\ failed_locs' = failed_locs \union { k }
+        /\ UNCHANGED << loc_network, msg_aether, thr_defs, trim >>
 
 (***************************************************************************)
 (* All variables, which are used by terms of the calculus, need to be      *)
@@ -735,6 +866,8 @@ as_tree_t1 ==
         ))
     ))
 
+as_tree_t1_loc_0 == loc(lit("loc_0"), [X \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t1))
+
 (***************************************************************************)
 (* Thread that declares the variable x and then assigns 10 to it.          *)
 (***************************************************************************)
@@ -744,12 +877,14 @@ as_tree_t2 ==
             thr_guard(Nil)
         ))
      ))
+     
+as_tree_t2_loc_0 == loc(lit("loc_0"), [X \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t2))
 
 (***************************************************************************)
 (* Thread that declares the variable x, assigns 10 to it and then          *)
 (* increments the variable by 1.                                           *)
 (***************************************************************************)
-as_tree_3 == 
+as_tree_t3 == 
     thr_guard(prefix(var(x),
         thr_guard(prefix(assign(x, num(10)),
             thr_guard(prefix(assign(x, add(x, num(1))),
@@ -757,6 +892,8 @@ as_tree_3 ==
             ))
         ))
     ))
+
+as_tree_t3_loc_0 == loc(lit("loc_0"), [X \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t3))
 
 (***************************************************************************)
 (* Composition thread: one thread declares the variable x and assigns the  *)
@@ -773,6 +910,8 @@ as_tree_t4 ==
             thr_guard(Nil)
          ))
     )
+
+as_tree_t4_loc_0 == loc(lit("loc_0"), [X \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t4))
 
 (***************************************************************************)
 (* Composition thread: One thread declares the variable x and assigns the  *)
@@ -792,6 +931,7 @@ as_tree_t5 ==
            ))
         ))
     )
+as_tree_t5_loc_0 == loc(lit("loc_0"), [X \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t5))
 
 (***************************************************************************)
 (* Composition thread: One thread is itself a composition of two           *)
@@ -820,8 +960,7 @@ as_tree_t6 ==
         ))
     )
 
-\* as_tree_t6_loc_1 == loc("loc_1", [X \in Variables |-> Undefined], SetToBag({ t4new }))
-as_tree_t6_loc_1 == loc("loc_1", [X \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t6))
+as_tree_t6_loc_0 == loc(lit("loc_0"), [X \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t6))
 
 (***************************************************************************)
 (* Thread that declares a variable and then sets the variable through a    *)
@@ -829,7 +968,7 @@ as_tree_t6_loc_1 == loc("loc_1", [X \in Variables |-> Undefined], flatten_thread
 (***************************************************************************)
 as_tree_t7 ==
     thr_guard(prefix(var(x),
-        thr_guard(prefix(rcv(c, [type |-> "literal", value |-> "loc_0"], x),
+        thr_guard(prefix(rcv(c, lit("loc_0"), x),
             thr_guard(Nil)
         ))
     ))
@@ -839,13 +978,13 @@ as_tree_t7 ==
 (* carrying the value 20.                                                  *)
 (***************************************************************************)
 msg_on_c_from_loc0_to_loc1 == 
-    msg(c, [type |-> "literal", value |-> "loc_0"], [type |-> "literal", value |-> "loc_1"], num(20))
+    msg(c, lit("loc_0"), lit("loc_1"), num(20))
 
 (***************************************************************************)
 (* Location 1, all variables are undefined, flattens the compositions from *)
 (* the root thread, so that they are ready to be picked up by the rules.   *)
 (***************************************************************************)
-as_tree_t7_loc_1 == loc("loc_1", [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t7))
+as_tree_t7_loc_1 == loc(lit("loc_1"), [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t7))
 
 (***************************************************************************)
 (* Location 0, which is sending a single message on channel c to location  *)
@@ -854,12 +993,12 @@ as_tree_t7_loc_1 == loc("loc_1", [variable \in Variables |-> Undefined], flatten
 as_tree_t8 ==
     thr_guard(
         prefix(snd(SetToBag({
-            out_msg(c, [type |-> "literal", value |-> "loc_1"], num(20))
+            out_msg(c, lit("loc_1"), num(20))
         })),
         thr_guard(Nil)
     ))
     
-as_tree_t8_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t8))
+as_tree_t8_loc_0 == loc(lit("loc_0"), [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t8))
 
 (***************************************************************************)
 (* Location 0, which is sending a two messages on channel c to location 1. *)
@@ -869,13 +1008,13 @@ as_tree_t8_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten
 as_tree_t9 ==
     thr_guard(
         prefix(snd(SetToBag({
-            out_msg(c, [type |-> "literal", value |-> "loc_1"], str("first_message")),
-            out_msg(c, [type |-> "literal", value |-> "loc_1"], str("second_message"))
+            out_msg(c, lit("loc_1"), str("first_message")),
+            out_msg(c, lit("loc_1"), str("second_message"))
         })),
         thr_guard(Nil)
     ))
     
-as_tree_t9_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t9))
+as_tree_t9_loc_0 == loc(lit("loc_0"), [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t9))
 
 (***************************************************************************)
 (* Location 0, which is sending a two messages on channel c to location 1. *)
@@ -884,14 +1023,14 @@ as_tree_t9_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten
 as_tree_t10 ==
     thr_guard(
         prefix(snd(
-            SetToBag({ out_msg(c, [type |-> "literal", value |-> "loc_1"], str("first_message")) })
+            SetToBag({ out_msg(c, lit("loc_1"), str("first_message")) })
             (+)
-            SetToBag({ out_msg(c, [type |-> "literal", value |-> "loc_1"], str("first_message")) })
+            SetToBag({ out_msg(c, lit("loc_1"), str("first_message")) })
         ),
         thr_guard(Nil)
     ))
     
-as_tree_t10_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t10))
+as_tree_t10_loc_0 == loc(lit("loc_0"), [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t10))
 
 (***************************************************************************)
 (* Simple conditional thread.  Depending on the condition 0 = 0 (which is  *)
@@ -910,7 +1049,7 @@ as_tree_t11 ==
         ))
     )
 
-as_tree_t11_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t11))
+as_tree_t11_loc_0 == loc(lit("loc_0"), [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t11))
 
 (***************************************************************************)
 (* Simple conditional thread.  Depending on the condition 0 = 1 (which is  *)
@@ -929,7 +1068,7 @@ as_tree_t12 ==
         ))
     )
 
-as_tree_t12_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t12))
+as_tree_t12_loc_0 == loc(lit("loc_0"), [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t12))
 
 (***************************************************************************)
 (* Simple thread identifier definition.  For the definition, we need to    *)
@@ -954,7 +1093,7 @@ as_tree_simple_thr_def ==
 as_tree_t13 ==
     thr_ident(L)
 
-as_tree_t13_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t13))
+as_tree_t13_loc_0 == loc(lit("loc_0"), [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t13))
 
 (***************************************************************************)
 (* Simple thread identifier definition.  For the definition, we need to    *)
@@ -969,7 +1108,8 @@ as_tree_thr_def_that_changes_var ==
     thr_ident_def(
         L,
         <<x>>,
-        prefix(assign(x, num(10)),
+        prefix(
+            assign(x, num(10)),
             thr_guard(Nil)
         )
     )
@@ -987,23 +1127,81 @@ as_tree_t14 ==
         )
     )
 
-as_tree_t14_loc_0 == loc("loc_0", [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t14))
+as_tree_t14_loc_0 == loc(lit("loc_0"), [variable \in Variables |-> Undefined], flatten_thread_compositions(as_tree_t14))
 
+(***************************************************************************)
+(* Consensus algorithm from the "Store Locally, Prove Globally" paper.     *)
+(***************************************************************************)
+CONSTANTS input_seq
+CONSTANTS chan, r, output
+
+M_bot == [variable \in Variables |-> Undefined]
+
+N == Len(input_seq)
+
+def_of_L(l) ==
+    thr_ident_def(
+        ident(l),
+        << chan, x, r, output >>,
+        prefix(
+            assign(r, add(r, lit(1))),
+            thr_cond(
+                leq(r, lit(N)),
+                thr_cond(
+                    equal(lit(l), r),
+                    thr_guard(
+                        prefix(
+                            snd( SetToBag({ out_msg(chan, lit(j), x) : j \in (1..N \ {l}) }) ),
+                            thr_ident(ident(l))
+                        )
+                    ),
+                    thr_guard(
+                        prefix(
+                            rcv(c, r, x),
+                            thr_ident(ident(l))
+                        )
+                    )
+                ),
+                thr_guard(
+                    prefix(
+                        assign(output, x),
+                        Nil
+                    )
+                )
+            )
+        )
+    )
+
+all_defs == { def_of_L(l) : l \in 1..Len(input_seq) }
+
+Consensus(input) ==
+    { loc(lit(l), [M_bot EXCEPT ![chan] = c,
+                                ![x] = input[l],
+                                ![r] = lit(0),
+                                ![output] =  Initialized], flatten_thread_compositions(thr_ident(ident(l))) ) 
+    : l \in 1..Len(input) }
+    
 (***************************************************************************)
 (* The initial state formula, which composes the initial state of the      *)
 (* system (declared in the calculus).                                      *)
 (***************************************************************************)
-Init == /\ EPC_state = { as_tree_t14_loc_0 }
-        /\ msg_aether = SetToBag({})
-        /\ thr_defs = { as_tree_thr_def_that_changes_var }
+Init == /\ loc_network = Consensus(input_seq)
+        /\ msg_aether = SetToBag({ })
+        /\ thr_defs = all_defs
+        /\ trim = Undefined
+        /\ failed_locs = { }
 
 (***************************************************************************)
 (* The next state relation, which simply states that the next states are   *)
 (* generated by the rules of the operational semantics of the calculus.    *)
 (***************************************************************************)
-Next == DeclNew \/ AssignNew \/ RcvNew \/ SndNew \/ TrueNew \/ FalseNew \/ IdentNew
+Next == Trim \/ Fail \/ Decl \/ Assign \/ Rcv \/ Susp \/ Snd \/ True \/ False \/ Ident
+
+Spec == Init /\ [][Next]_vars
+
+FairSpec == Spec /\ WF_vars(Next)
 
 =============================================================================
 \* Modification History
-\* Last modified Sun Aug 10 19:02:19 CEST 2025 by todormoskov
+\* Last modified Tue Aug 12 10:15:33 CEST 2025 by todormoskov
 \* Created Mon Aug 04 15:06:46 CEST 2025 by todormoskov
