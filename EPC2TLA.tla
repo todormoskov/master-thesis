@@ -169,7 +169,6 @@ thr_compN(index_set, body) ==
 (* thread.  The transitions it can perform are exactly the transitions,    *)
 (* which the thread can perform.                                           *)
 (***************************************************************************)
-\* loc_state is a set of lists of prefixes
 loc(id, mem, threads_bag) ==
     [type |-> "location",
      subtype |-> "single",
@@ -857,6 +856,17 @@ as_list_loc_1 == loc("loc_1", [X \in Variables |-> Undefined], { as_list_t3 })
 \*var_x_assign_x_x_plus_1_0 == <<[var |-> x], [type |-> "assign", lhs |-> "x", rhs |-> "x+1"], Nil>>
 
 (***************************************************************************)
+(*                                                                         *)
+(* parallel(<<                                                             *)
+(*     << var(x), assign(x, lit(10)), Nil >>,                              *)
+(*     << var(y), assign(y, lit(100)), Nil >>,                             *)
+(*     << var(z), assign(z, lit(1000)), Nil >>,                            *)
+(* >>)                                                                     *)
+(*                                                                         *)
+(***************************************************************************)
+
+
+(***************************************************************************)
 (* Thread that declares two variables (x, y) seqentially.                  *)
 (***************************************************************************)
 as_tree_t1 ==
@@ -1172,6 +1182,43 @@ def_of_L(l) ==
         )
     )
 
+(***************************************************************************
+    "Syntax" as lists (Part 2):
+    
+    def(ident(l), << chan, x, r, output >>,
+        <<  assign(r, add(r, lit(1))),
+            if( leq(r, lit(N)),
+                if( equal(lit(l), r),
+                    << snd( SetToBag({ out_msg(chan, lit(j), x) : j \in (1..N \ {l}) }) ), spawn(ident(l)) >>,
+                    << rcv(c, r, x), spawn(ident(l)) >> ),
+                << assign(output, x), Nil >>
+            )
+        >>
+    )
+    
+    << ... >> are threads
+    They can prefix any number of actions,
+    but to be "correct" their last element should
+    be a conditional, instantiation or composition.
+    
+    In a process, we have a bag of threads.
+    Where we execute their actions one by one.
+    The moment we reach the end of a thread, we:
+    1) case of conditional -> evaluate the condition
+       and substitute the current thread list, with 
+       the one given in the conditional,
+    2) case of instatiation -> substitute the current
+       thread for the body of the definition,
+    3) case of composition -> remove the the current
+       thread from the bag of threads in the process
+       and add the threads from the composition.
+       Something like:
+       parallel(<< 
+            << var(x), assign(x, lit(10)) >>, 
+            << var(y), assign(y, lit(10)) >> 
+       >>)
+ ***************************************************************************)
+
 all_defs == { def_of_L(l) : l \in 1..Len(input_seq) }
 
 Consensus(input) ==
@@ -1203,5 +1250,5 @@ FairSpec == Spec /\ WF_vars(Next)
 
 =============================================================================
 \* Modification History
-\* Last modified Tue Aug 12 10:15:33 CEST 2025 by todormoskov
+\* Last modified Tue Aug 12 12:21:04 CEST 2025 by todormoskov
 \* Created Mon Aug 04 15:06:46 CEST 2025 by todormoskov
