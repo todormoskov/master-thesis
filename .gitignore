@@ -1,0 +1,14 @@
+# Ignore TLA+ cache files
+.tlacache
+*toolbox
+
+# Ignore the MacOS .DS_Store file
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Metals
+.bloop/
+.metals/
+metals.sbt
