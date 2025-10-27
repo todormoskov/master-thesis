@@ -124,7 +124,26 @@ object Lexer {
     MINUS_SEPARATOR,
     EQUAL_SEPARATOR,
     BACKSLASH_OPERATOR,
-    UNKNOWN_OPERATOR
+    UNKNOWN_OPERATOR,
+    AT,
+    AT_AT,
+
+    EPC_VAR,
+    EPC_ASSIGN,
+    EPC_LOC_SCOPE_OPEN,
+    EPC_LOC_SCOPE_CLOSE,
+    EPC_LOC_MEMORY_CODE_SEP,
+    EPC_LOC_COMPOSITION,
+    EPC_THREAD_COMPOSITION,
+    EPC_MULTISET_OPEN,
+    EPC_MULTISET_CLOSE,
+    EPC_NEW,
+    EPC_IF,
+    EPC_THEN,
+    EPC_ELSE,
+    EPC_DEF,
+    EPC_UNDEFINED,
+    EPC_INITIALIZED
 
   case class Token(kind: TokenKind, value: String)
 
@@ -278,6 +297,10 @@ object Lexer {
         }
         if (c == ':') {
           scanner.consume()
+          if (scanner.peek().isDefined && scanner.peek().get == '=') {
+            scanner.consume()
+            return Token(TokenKind.EPC_ASSIGN, ":=")
+          }
           return Token(TokenKind.COLON, ":")
         }
         if (c == ',') {
@@ -329,18 +352,34 @@ object Lexer {
             scanner.consume()
             return Token(TokenKind.SQUARE, "[]")
           }
+          if (scanner.peek().isDefined && scanner.peek().get == '[') {
+            scanner.consume()
+            return Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[[")
+          }
           return Token(TokenKind.LEFT_SQUARE_BRACKET, "[")
         }
         if (c == ']') {
           scanner.consume()
+          if (scanner.peek().isDefined && scanner.peek().get == ']') {
+            scanner.consume()
+            return Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]")
+          }
           return Token(TokenKind.RIGHT_SQUARE_BRACKET, "]")
         }
         if (c == '{') {
           scanner.consume()
+          if (scanner.peek().isDefined && scanner.peek().get == '{') {
+            scanner.consume()
+            return Token(TokenKind.EPC_MULTISET_OPEN, "{{")
+          }
           return Token(TokenKind.LEFT_CURLY_BRACKET, "{")
         }
         if (c == '}') {
           scanner.consume()
+          if (scanner.peek().isDefined && scanner.peek().get == '}') {
+            scanner.consume()
+            return Token(TokenKind.EPC_MULTISET_CLOSE, "}}")
+          }
           return Token(TokenKind.RIGHT_CURLY_BRACKET, "}")
         }
         if (c == '=') {
@@ -397,6 +436,10 @@ object Lexer {
             scanner.consume()
             return Token(TokenKind.DIAMOND, "<>")
           }
+          if (scanner.peek().isDefined && scanner.peek().get == '|') {
+            scanner.consume()
+            return Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|")
+          }
           return Token(TokenKind.LT, "<")
         }
         if (c == '>') {
@@ -421,7 +464,11 @@ object Lexer {
             }
             return Token(TokenKind.UNKNOWN_OPERATOR, "|-")
           }
-          return Token(TokenKind.UNKNOWN_OPERATOR, "|")
+          if (scanner.peek().isDefined && scanner.peek().get == '|') {
+            scanner.consume()
+            return Token(TokenKind.EPC_LOC_COMPOSITION, "||")
+          }
+          return Token(TokenKind.EPC_THREAD_COMPOSITION, "|")
         }
         if (c == '/') {
           scanner.consume()
@@ -483,6 +530,14 @@ object Lexer {
             case default => Token(TokenKind.BACKSLASH_OPERATOR, name)
           }
         }
+        if (c == '@') {
+          scanner.consume()
+          if (scanner.peek().isDefined && scanner.peek().get == '@') {
+            scanner.consume()
+            return Token(TokenKind.AT_AT, "@@")
+          }
+          return Token(TokenKind.AT, "@")
+        }
         // Identifier: [a-zA-Z_][a-zA-Z0-9_]*
         if (c.isLetter || c == '_') {
           val sbName = new StringBuilder
@@ -534,6 +589,15 @@ object Lexer {
             // Temporal operators
             case "WF" => Token(TokenKind.WF, name)
             case "SF" => Token(TokenKind.SF, name)
+            // EPC operators
+            case "var" => Token(TokenKind.EPC_VAR, name)
+            case "new" => Token(TokenKind.EPC_NEW, name)
+            case "if" => Token(TokenKind.EPC_IF, name)
+            case "then" => Token(TokenKind.EPC_THEN, name)
+            case "else" => Token(TokenKind.EPC_ELSE, name)
+            case "def" => Token(TokenKind.EPC_DEF, name)
+            case "Undefined" => Token(TokenKind.EPC_UNDEFINED, name)
+            case "Initialized" => Token(TokenKind.EPC_INITIALIZED, name)
             // Identifier
             case default => Token(TokenKind.IDENTIFIER, name)
           }

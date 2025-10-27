@@ -916,5 +916,405 @@ class LexerTest extends AnyFunSuite {
     )
   }
 
+  test("Recognizes EPC 'var' declarations") {
+    val inputSpec =
+      """var x.0""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.EPC_VAR, "var"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes EPC 'assign' actions") {
+    val inputSpec =
+      """<x := 10>.0""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.LT, "<"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.EPC_ASSIGN, ":="),
+        Token(TokenKind.INTEGER, "10"),
+        Token(TokenKind.GT, ">"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes single EPC location with an integer id") {
+    val inputSpec =
+      """(p = 1) [[ [x |-> Undefined] <| var x. <x := 10>. 0 ]]""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
+        Token(TokenKind.IDENTIFIER, "p"),
+        Token(TokenKind.EQ, "="),
+        Token(TokenKind.INTEGER, "1"),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
+        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.MAPS_TO, "|->"),
+        Token(TokenKind.EPC_UNDEFINED, "Undefined"),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
+        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
+        Token(TokenKind.EPC_VAR, "var"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.LT, "<"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.EPC_ASSIGN, ":="),
+        Token(TokenKind.INTEGER, "10"),
+        Token(TokenKind.GT, ">"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes single EPC location with a string id") {
+    val inputSpec =
+      """(q = "a") [[ [x |-> Undefined] <| var x. <x := 10>. 0 ]]""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
+        Token(TokenKind.IDENTIFIER, "q"),
+        Token(TokenKind.EQ, "="),
+        Token(TokenKind.STRING, "a"),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
+        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.MAPS_TO, "|->"),
+        Token(TokenKind.EPC_UNDEFINED, "Undefined"),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
+        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
+        Token(TokenKind.EPC_VAR, "var"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.LT, "<"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.EPC_ASSIGN, ":="),
+        Token(TokenKind.INTEGER, "10"),
+        Token(TokenKind.GT, ">"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes multiple EPC locations with integer ids") {
+    val inputSpec =
+      """|| (p \in 1..10) [[ [x |-> Undefined] <| var x. <x := 10>. 0 ]]"""
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.EPC_LOC_COMPOSITION, "||"),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
+        Token(TokenKind.IDENTIFIER, "p"),
+        Token(TokenKind.SET_IN, "\\in"),
+        Token(TokenKind.INTEGER, "1"),
+        Token(TokenKind.DOT_DOT, ".."),
+        Token(TokenKind.INTEGER, "10"),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
+        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.MAPS_TO, "|->"),
+        Token(TokenKind.EPC_UNDEFINED, "Undefined"),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
+        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
+        Token(TokenKind.EPC_VAR, "var"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.LT, "<"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.EPC_ASSIGN, ":="),
+        Token(TokenKind.INTEGER, "10"),
+        Token(TokenKind.GT, ">"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes multiple EPC locations with string ids") {
+    val inputSpec =
+      """|| (q \in {"a", "b"}) [[ [x |-> Undefined] <| var x. <x := 10>. 0 ]]"""
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.EPC_LOC_COMPOSITION, "||"),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
+        Token(TokenKind.IDENTIFIER, "q"),
+        Token(TokenKind.SET_IN, "\\in"),
+        Token(TokenKind.LEFT_CURLY_BRACKET, "{"),
+        Token(TokenKind.STRING, "a"),
+        Token(TokenKind.COMMA, ","),
+        Token(TokenKind.STRING, "b"),
+        Token(TokenKind.RIGHT_CURLY_BRACKET, "}"),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
+        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.MAPS_TO, "|->"),
+        Token(TokenKind.EPC_UNDEFINED, "Undefined"),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
+        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
+        Token(TokenKind.EPC_VAR, "var"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.LT, "<"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.EPC_ASSIGN, ":="),
+        Token(TokenKind.INTEGER, "10"),
+        Token(TokenKind.GT, ">"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes EPC Initialized value ") {
+    val inputSpec =
+      """(p = 1) [[ [x |-> Initialized] <| 0 ]]""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
+        Token(TokenKind.IDENTIFIER, "p"),
+        Token(TokenKind.EQ, "="),
+        Token(TokenKind.INTEGER, "1"),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
+        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.MAPS_TO, "|->"),
+        Token(TokenKind.EPC_INITIALIZED, "Initialized"),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
+        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
+        Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes thread compositions") {
+    val inputSpec =
+      """(p = 1) [[ [] <|
+        |           ( var x. <x := 10>. 0
+        |           | var y. <y := 10>. 0
+        |           | var z. <z := 10>. 0)
+        |]]""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
+        Token(TokenKind.IDENTIFIER, "p"),
+        Token(TokenKind.EQ, "="),
+        Token(TokenKind.INTEGER, "1"),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
+        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
+        Token(TokenKind.SQUARE, "[]"),
+        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
+        Token(TokenKind.NEWLINE, null),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
+        Token(TokenKind.EPC_VAR, "var"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.LT, "<"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.EPC_ASSIGN, ":="),
+        Token(TokenKind.INTEGER, "10"),
+        Token(TokenKind.GT, ">"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.NEWLINE, null),
+        Token(TokenKind.EPC_THREAD_COMPOSITION, "|"),
+        Token(TokenKind.EPC_VAR, "var"),
+        Token(TokenKind.IDENTIFIER, "y"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.LT, "<"),
+        Token(TokenKind.IDENTIFIER, "y"),
+        Token(TokenKind.EPC_ASSIGN, ":="),
+        Token(TokenKind.INTEGER, "10"),
+        Token(TokenKind.GT, ">"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.NEWLINE, null),
+        Token(TokenKind.EPC_THREAD_COMPOSITION, "|"),
+        Token(TokenKind.EPC_VAR, "var"),
+        Token(TokenKind.IDENTIFIER, "z"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.LT, "<"),
+        Token(TokenKind.IDENTIFIER, "z"),
+        Token(TokenKind.EPC_ASSIGN, ":="),
+        Token(TokenKind.INTEGER, "10"),
+        Token(TokenKind.GT, ">"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
+        Token(TokenKind.NEWLINE, null),
+        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes EPC channel definitions") {
+    val inputSpec =
+      """new c""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.EPC_NEW, "new"),
+        Token(TokenKind.IDENTIFIER, "c"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes EPC receiving a message on a channel") {
+    val inputSpec =
+      """c@2(x)""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.IDENTIFIER, "c"),
+        Token(TokenKind.AT, "@"),
+        Token(TokenKind.INTEGER, "2"),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes EPC sending a message on a channel") {
+    val inputSpec =
+      """c@2<x>""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.IDENTIFIER, "c"),
+        Token(TokenKind.AT, "@"),
+        Token(TokenKind.INTEGER, "2"),
+        Token(TokenKind.LT, "<"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.GT, ">"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes EPC traveling messages") {
+    val inputSpec =
+      """c{1 -> 2}<1>""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.IDENTIFIER, "c"),
+        Token(TokenKind.LEFT_CURLY_BRACKET, "{"),
+        Token(TokenKind.INTEGER, "1"),
+        Token(TokenKind.RIGHT_ARROW, "->"),
+        Token(TokenKind.INTEGER, "2"),
+        Token(TokenKind.RIGHT_CURLY_BRACKET, "}"),
+        Token(TokenKind.LT, "<"),
+        Token(TokenKind.INTEGER, "1"),
+        Token(TokenKind.GT, ">"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes EPC multi-sets") {
+    val inputSpec =
+      """{{ 1, 1 }}""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.EPC_MULTISET_OPEN, "{{"),
+        Token(TokenKind.INTEGER, "1"),
+        Token(TokenKind.COMMA, ","),
+        Token(TokenKind.INTEGER, "1"),
+        Token(TokenKind.EPC_MULTISET_CLOSE, "}}"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes EPC conditional threads") {
+    val inputSpec =
+      """if 1 = 1 then 0 else 0""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.EPC_IF, "if"),
+        Token(TokenKind.INTEGER, "1"),
+        Token(TokenKind.EQ, "="),
+        Token(TokenKind.INTEGER, "1"),
+        Token(TokenKind.EPC_THEN, "then"),
+        Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.EPC_ELSE, "else"),
+        Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes EPC thread definitions") {
+    val inputSpec =
+      """def declareXAndStop() = var x. 0""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.EPC_DEF, "def"),
+        Token(TokenKind.IDENTIFIER, "declareXAndStop"),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
+        Token(TokenKind.EQ, "="),
+        Token(TokenKind.EPC_VAR, "var"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
 
 }
