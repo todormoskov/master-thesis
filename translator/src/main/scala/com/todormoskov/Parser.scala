@@ -5,20 +5,110 @@ import com.todormoskov.Lexer.*
 import scala.collection.mutable.ListBuffer
 
 sealed trait AST
-case class ExtendsStatement(extendedModules: List[String]) extends AST
-case class ConstantDeclaration(constants: List[String]) extends AST
-case class VariableDeclaration(variables: List[String]) extends AST
+case class ExtendsStatement(extendedModules: List[Identifier]) extends AST
+case class ConstantDeclaration(constants: List[Identifier]) extends AST
+case class VariableDeclaration(variables: List[Identifier]) extends AST
 
+/**
+ * Expression trait.
+ */
 sealed trait Expression extends AST
+/**
+ * Literal value. E.g. TRUE, FALSE, BOOLEAN, 1, 2, 3, ..., "a", "aa", ...
+ */
 case class Literal(value: String |  Integer | Boolean) extends Expression
+/**
+ * Single identifier. E.g. x or y.
+ */
 case class Identifier(name: String) extends Expression
+/**
+ * TLA+ tuple with identifiers. E.g. << x, y >>.
+ */
+case class IdentifierTuple(identifiers: List[Identifier]) extends Expression
+/**
+ * Examples for quantifier bounds: "n \in Nat", "n, m \in Nat" or "<< n, m >> \in Nat \times Nat".
+ */
+case class QuantifierBound(variable: Identifier | List[Identifier] | IdentifierTuple, domain: Expression) extends Expression
+/**
+ * An identifier to expression mapping. E.g. x |-> 1 or x : 1..10.
+ */
+case class Mapping(identifier: Identifier, expression: Expression) extends Expression
+/**
+ * A TLA+ tuple of expressions. E.g. << 1, 2, 3 >>.
+ */
+case class Tuple(values: List[Expression]) extends Expression
+/**
+ * Unary expressions. E.g. -1, -(1+1).
+ */
+case class UnaryExpression(operator: String, expression: Expression) extends Expression
+/**
+ * Binary expressions. E.g. 1 + 1, x * x.
+ */
+case class BinaryExpression(operator: String, lhs: Expression, rhs: Expression) extends Expression
+/**
+ * Operator application expressions. E.g. f(1, 2, 3).
+ */
 case class OperatorApplication(operatorName: String, operands: List[Expression]) extends Expression
+/**
+ * Function application expressions. E.g. f[1, 2, 3].
+ */
 case class FunctionApplication(expression: Expression, operands: List[Expression]) extends Expression
+/**
+ * A primed expression. E.g. x'
+ */
+case class PrimedExpression(expression: Expression) extends Expression
+/**
+ * Expression with parenthesis around it.
+ */
+case class ParenthesizedExpression(expression: Expression) extends Expression
+/**
+ * TLA+ IF-THEN_ELSE expression.
+ */
+case class IfThenElse(condition: Expression, thenExpr: Expression, elseExpr: Expression) extends Expression
+/**
+ * TLA+ CHOOSE expression.
+ */
+case class ChooseExpression(variable: Identifier | IdentifierTuple, domain: Expression, predicate: Expression) extends Expression
+/**
+ * TLA+ bounded quantified expression. E.g. \E x \in S: ...; \A x \in S: ...
+ */
+case class BoundedQuantifiedExpression(quantifier: String, binders: List[QuantifierBound], body: Expression) extends Expression
+/**
+ * TLA+ quantified expression. E.g. \E x, y: ...; \A x, y : ...
+ */
+case class QuantifiedExpression(quantifier: String, binders: List[Identifier], body: Expression) extends Expression
 
+
+/**
+ * Set trait.
+ */
 sealed trait Set extends Expression
-case class FilteredSet(variable: Identifier, domain: Expression, predicate: Expression) extends Set
+/**
+ * Explicitly given set. E.g. { 1, 2, 3}.
+ */
 case class ExplicitSet(values: List[Expression]) extends Set
-case class MappedSet(mappingExpression: Expression, variable: Identifier, domain: Expression) extends Set
+/**
+ * Set, which is defined through a single quantifier bound. E.g. { x \in S : P(x) }.
+ */
+case class BoundedSetComprehension(variable: Identifier | IdentifierTuple, domain: Expression, predicate: Expression) extends Set
+/**
+ * General quantified set comprehension. E.g. { f(x, y) : x \in S, y \in T }.
+ */
+case class QuantifiedSetComprehension(mappingExpression: Expression, quantifierBounds: List[QuantifierBound]) extends Set
+
+sealed trait Function extends Expression
+case class ExplicitFunction(mappings: List[Mapping]) extends Function
+case class BoundedMapping(quantifierBounds: List[QuantifierBound], expression: Expression) extends Function
+case class SetOfAllFunctions(domain: Expression, codomain: Expression) extends Function
+case class SetOfAllRecords(mappings: List[Mapping]) extends Function
+
+// Except Expressions
+sealed trait SelectorPart extends AST
+case class DotSelector(name: Identifier) extends SelectorPart
+case class IndexSelector(indices: List[Expression]) extends SelectorPart
+case class SelectorPath(parts: List[SelectorPart]) extends AST
+case class ExceptClause(selector: SelectorPath, value: Expression) extends AST
+case class ExceptExpression(exceptTarget: Expression, clauses: List[ExceptClause]) extends Function
 
 case class Statement() extends AST
 case class Module(name: String, extendsStmt: ExtendsStatement, statements: List[Statement]) extends AST
@@ -63,49 +153,6 @@ class Parser(lexer: Tokenizer) {
       else Left(s"Syntax error: token of kind $expected not found!")
 
   /**
-   * Check if the next token is a literal.
-   *
-   * @return True if the next token is a literal, else false.
-   */
-  private def checkLiteral(): Boolean = {
-    check(TokenKind.TRUE)
-      || check(TokenKind.TRUE)
-      || check(TokenKind.BOOLEAN)
-      || check(TokenKind.INTEGER)
-      || check(TokenKind.STRING)
-  }
-
-  /**
-   * Parse a literal.
-   *
-   * literal := 'TRUE', 'FALSE', 'BOOLEAN', Integer, String
-   *
-   * @return Literal as AST-Node.
-   */
-  def parseLiteral(): Either[String, Literal] = {
-    if check(TokenKind.TRUE)
-      then for token <- consume(TokenKind.TRUE) yield Literal(token.value == "TRUE")
-    else if check(TokenKind.FALSE)
-      then for token <- consume(TokenKind.FALSE) yield Literal(token.value != "FALSE")
-    else if check(TokenKind.BOOLEAN)
-      then for token <- consume(TokenKind.BOOLEAN) yield Literal(token.value)
-    else if check(TokenKind.INTEGER)
-      then for token <- consume(TokenKind.INTEGER) yield Literal(Integer.valueOf(token.value))
-    else if check(TokenKind.STRING)
-      then for token <- consume(TokenKind.STRING) yield Literal(token.value)
-    else Left("Error: Literal not recognized")
-  }
-
-  /**
-   * Parse an identifier.
-   *
-   * @return Identifier as AST-Node.
-   */
-  def parseIdentifier(): Either[String, Identifier] = {
-    for token <- consume(TokenKind.IDENTIFIER) yield Identifier(token.value)
-  }
-
-  /**
    * Parses a comma-separated list of objects (identifiers, expressions, ...).
    *
    * @param consumer Consumer function for the separate objects.
@@ -148,14 +195,6 @@ class Parser(lexer: Tokenizer) {
     } yield result
 
   /**
-   * Parses a comma-separated list of identifiers.
-   *
-   * @return A list of parsed identifier tokens.
-   */
-  private def parseCommaListOfIdentifiers: Either[String, List[Token]] =
-    parseCommaList[Token](() => consume(TokenKind.IDENTIFIER))
-
-  /**
    * Parse an EXTENDS statement.
    *
    * ExtendsStmt := ['EXTENDS' Identifier [',' Identifier]* ]?
@@ -166,7 +205,7 @@ class Parser(lexer: Tokenizer) {
     if check(TokenKind.EXTENDS) then for {
         _ <- consume(TokenKind.EXTENDS)
         extendedModules <- parseCommaListOfIdentifiers
-      } yield ExtendsStatement(extendedModules.map(_.value))
+      } yield ExtendsStatement(extendedModules)
     else Right(ExtendsStatement(Nil))
 
   /**
@@ -180,7 +219,7 @@ class Parser(lexer: Tokenizer) {
     if check(TokenKind.CONSTANT) || check(TokenKind.CONSTANTS) then for {
         _ <- if check(TokenKind.CONSTANT) then consume(TokenKind.CONSTANT) else consume(TokenKind.CONSTANTS)
         declaredConstants <- parseCommaListOfIdentifiers
-      } yield ConstantDeclaration(declaredConstants.map(_.value))
+      } yield ConstantDeclaration(declaredConstants)
     else Right(ConstantDeclaration(Nil))
 
   /**
@@ -194,7 +233,7 @@ class Parser(lexer: Tokenizer) {
     if check(TokenKind.VARIABLE) || check(TokenKind.VARIABLES) then for {
         _ <- if check(TokenKind.VARIABLE) then consume(TokenKind.VARIABLE) else consume(TokenKind.VARIABLES)
         declaredVariables <- parseCommaListOfIdentifiers
-      } yield VariableDeclaration(declaredVariables.map(_.value))
+      } yield VariableDeclaration(declaredVariables)
     else Right(VariableDeclaration(Nil))
 
   /**
@@ -202,7 +241,7 @@ class Parser(lexer: Tokenizer) {
    * @return
    */
   def parseExpression(): Either[String, Expression] =
-    parseFunctionApplication()
+    parseImplication()
 
   /**
    * Parse a comma-separated list of expressions.
@@ -213,17 +252,418 @@ class Parser(lexer: Tokenizer) {
     parseCommaList[Expression](() => parseExpression())
 
   /**
+   * Parse a binary implication.
+   * Implications have precedence range 1-1.
+   *
+   * Implication := Expression '=>' Expression
+   *
+   * @return
+   */
+  private def parseImplication(): Either[String, Expression] = for {
+    expression <- parseEquivalence()
+    finalResult <- {
+      def loop(lhs: Expression): Either[String, Expression] =
+        lexer.peek() match {
+          case Token(kind, value) if kind == TokenKind.IMPLICATION => for {
+            _ <- consume(kind)
+            rhs <- parseEquivalence()
+            intermediateResult <- loop(BinaryExpression(value, lhs, rhs))
+          } yield intermediateResult
+          case _ => Right(lhs)
+        }
+
+      loop(expression)
+    }
+  } yield finalResult
+
+  /**
+   * Parse a binary equivalence.
+   * Equivalences have precedence range 2-2.
+   *
+   * Equivalence := Expression '\equiv' Expression
+   *
+   * @return
+   */
+  private def parseEquivalence(): Either[String, Expression] = for {
+    expression <- parseConjunctionOrDisjunction()
+    finalResult <- {
+      def loop(lhs: Expression): Either[String, Expression] =
+        lexer.peek() match {
+          case Token(kind, value) if kind == TokenKind.EQUIVALENCE => for {
+            _ <- consume(kind)
+            rhs <- parseConjunctionOrDisjunction()
+            intermediateResult <- loop(BinaryExpression(value, lhs, rhs))
+          } yield intermediateResult
+          case _ => Right(lhs)
+        }
+
+      loop(expression)
+    }
+  } yield finalResult
+
+  /**
+   * Parse a binary conjunction or disjunction.
+   * Conjunctions and disjunctions have precedence range 3-3 and are left-associative.
+   *
+   * ConjunctionOrDisjunction := Expression ['/\' | '\/'] Expression
+   *
+   * @return
+   */
+  private def parseConjunctionOrDisjunction(): Either[String, Expression] = for {
+    expression <- parsePrefixOperatorsWithPrecedenceRange4()
+    finalResult <- {
+      def loop(lhs: Expression): Either[String, Expression] =
+        lexer.peek() match {
+          case Token(kind, value) if kind == TokenKind.AND || kind == TokenKind.OR => for {
+            _ <- consume(kind)
+            rhs <- parsePrefixOperatorsWithPrecedenceRange4()
+            intermediateResult <- loop(BinaryExpression(value, lhs, rhs))
+          } yield intermediateResult
+          case _ => Right(lhs)
+        }
+
+      loop(expression)
+    }
+  } yield finalResult
+
+  /**
+   * Set with the token kinds '~', 'ENABLED', 'UNCHANGED', '[]' and '<>'.
+   */
+  private val prefixOperatorsWithPrecedenceRange4 = Set(
+    TokenKind.NOT, TokenKind.ENABLED, TokenKind.UNCHANGED, TokenKind.SQUARE, TokenKind.DIAMOND)
+
+  /**
+   * Parse the ~, ENABLED, UNCHANGED, SQUARE, DIAMOND prefix operators.
+   * The operator ~ has precedence range 4-4
+   * These rest of the operators have precedence range 4-15.
+   *
+   * ['~' | 'ENABLED' | 'UNCHANGED' | '[]' | '<>'] Expression
+   *
+   * @return
+   */
+  private def parsePrefixOperatorsWithPrecedenceRange4(): Either[String, Expression] =
+    lexer.peek() match {
+      case Token(kind, value) if prefixOperatorsWithPrecedenceRange4 contains kind => for {
+        _ <- consume(kind)
+        innerExpression <- parsePrefixOperatorsWithPrecedenceRange4()
+      } yield UnaryExpression(value, innerExpression)
+      case _ => for expression <- parseRelationalOperators() yield expression
+    }
+
+  /**
+   * Set with the token kinds '=', '/=', '<', '<=', '>', '>=', '\in', '\notin' and '\subset'.
+   */
+  private val relationalTokens = Set(TokenKind.EQ, TokenKind.NEQ, TokenKind.LT, TokenKind.LE, TokenKind.GT, TokenKind.GE,
+    TokenKind.SET_IN, TokenKind.NOTIN, TokenKind.SUBSET)
+
+  /**
+   * Parse an equality / relational / membership operator.
+   * These operators have precedence range 5-5 (and currently are implemented left-associatively).
+   *
+   * SetOperation := Expression [ '=' | '/='  | '<' | '<=' | '>' | '>=' | '\in' | '\notin' | '\subset' ] Expression
+   *
+   * @return
+   */
+  private def parseRelationalOperators(): Either[String, Expression] = for {
+    expression <- parseSubsetOrUnionExpression()
+    finalResult <- {
+      def loop(lhs: Expression): Either[String, Expression] =
+        lexer.peek() match {
+          case Token(kind, value) if relationalTokens contains kind => for {
+            _ <- consume(kind)
+            rhs <- parseSubsetOrUnionExpression()
+            intermediateResult <- loop(BinaryExpression(value, lhs, rhs))
+          } yield intermediateResult
+          case _ => Right(lhs)
+        }
+
+      loop(expression)
+    }
+  } yield finalResult
+
+  /**
+   * Parse the SUBSET and UNION prefix operators.
+   * These operators have precedence range 8-8.
+   *
+   * ['SUBSET' | 'Union'] Expression
+   *
+   * @return
+   */
+  private def parseSubsetOrUnionExpression(): Either[String, Expression] =
+    for expression <- if check(TokenKind.BIG_SUBSET) || check(TokenKind.BIG_UNION)
+      then for {
+        token <- if check(TokenKind.BIG_SUBSET) then consume(TokenKind.BIG_SUBSET) else consume(TokenKind.BIG_UNION)
+        innerExpression <- parseSubsetOrUnionExpression()
+      } yield UnaryExpression(token.value, innerExpression)
+      else parseSetOperations()
+    yield expression
+
+  /**
+   * Parse a set expression (set-difference, union, disjunction).
+   * These operators have precedence range 8-8
+   * and the union and intersection are left-associative.
+   *
+   * SetOperation := Expression [ '\' | '\union' | '\intersect'] Expression
+   *
+   * @return
+   */
+  private def parseSetOperations(): Either[String, Expression] = for {
+    expression <- parseDomainExpression()
+    finalResult <- {
+      def loop(lhs: Expression): Either[String, Expression] = {
+        if check(TokenKind.SET_DIFFERENCE) then for {
+          token <- consume(TokenKind.SET_DIFFERENCE)
+          rhs <- parseDomainExpression()
+          intermediateResult <- loop(BinaryExpression(token.value, lhs, rhs))
+        } yield intermediateResult
+        else if check(TokenKind.UNION) then for {
+          token <- consume(TokenKind.UNION)
+          rhs <- parseDomainExpression()
+          intermediateResult <- loop(BinaryExpression(token.value, lhs, rhs))
+        } yield intermediateResult
+        else if check(TokenKind.INTERSECT) then for {
+          token <- consume(TokenKind.INTERSECT)
+          rhs <- parseDomainExpression()
+          intermediateResult <- loop(BinaryExpression(token.value, lhs, rhs))
+        } yield intermediateResult
+        else Right(lhs)
+      }
+      loop(expression)
+    }
+  } yield finalResult
+
+  /**
+   * Parse the DOMAIN prefix operator.
+   * The operator DOMAIN has precedence range 9-9.
+   *
+   * 'DOMAIN' Expression
+   *
+   * @return
+   */
+  private def parseDomainExpression(): Either[String, Expression] =
+    for expression <- if check(TokenKind.DOMAIN)
+      then for {
+          token <- consume(TokenKind.DOMAIN)
+          innerExpression <- parseDomainExpression()
+        } yield UnaryExpression(token.value, innerExpression)
+      else parseRangeExpression()
+    yield expression
+
+  /**
+   * Parse range expressions.
+   * The range operator .. has precedence range 9-9.
+   *
+   * RangeExpression := Expression '..' Expression
+   *
+   * @return
+   */
+  private def parseRangeExpression(): Either[String, Expression] = {
+    for {
+      lhs <- parseAdditiveExpression()
+      result <- if check(TokenKind.DOT_DOT) then for {
+        _ <- consume(TokenKind.DOT_DOT)
+        rhs <- parseAdditiveExpression()
+      } yield BinaryExpression("..", lhs, rhs)
+      else Right(lhs)
+    } yield result
+  }
+
+  /**
+   * Parse an additive expression (left-associatively).
+   * The plus operator has precedence range 10-10.
+   * The minus operator has precedence range 11-11.
+   * However, here there are implemented in the same function
+   * (which means that the bind equally strong).
+   *
+   * @return
+   */
+  private def parseAdditiveExpression(): Either[String, Expression] = for {
+    expression <- parseMultiplicativeExpression()
+    finalResult <- {
+      def loop(lhs: Expression): Either[String, Expression] = {
+        if check(TokenKind.PLUS) then for {
+          _ <- consume(TokenKind.PLUS)
+          rhs <- parseMultiplicativeExpression()
+          intermediateResult <- loop(BinaryExpression("+", lhs, rhs))
+        } yield intermediateResult
+        else if check(TokenKind.MINUS) then for {
+          _ <- consume(TokenKind.MINUS)
+          rhs <- parseMultiplicativeExpression()
+          intermediateResult <- loop(BinaryExpression("-", lhs, rhs))
+        } yield intermediateResult
+        else Right(lhs)
+      }
+      loop(expression)
+    }
+  } yield finalResult
+
+  /**
+   * Set with the token kinds '*', '/', '%', '\X', '\times'
+   */
+  private val multiplicativeTokens = Set(TokenKind.MUL, TokenKind.DIV, TokenKind.MOD, TokenKind.TIMES)
+
+  /**
+   * Parse a multiplication expression (left-associatively).
+   * The *, /, %, \X operators have precedence range 13-13 and are left-associative.
+   *
+   * @return
+   */
+  private def parseMultiplicativeExpression(): Either[String, Expression] = for {
+    expression <- parseUnaryMinusExpression()
+    finalResult <- {
+      def loop(lhs: Expression): Either[String, Expression] =
+        lexer.peek() match {
+          case Token(kind, value) if multiplicativeTokens contains kind => for {
+            _ <- consume(kind)
+            rhs <- parseUnaryMinusExpression()
+            intermediateResult <- loop(BinaryExpression(value, lhs, rhs))
+          } yield intermediateResult
+          case _ => Right(lhs)
+        }
+      loop(expression)
+    }
+  } yield finalResult
+
+  /**
+   * Parse a unary minus expression.
+   * The unary minus operator has precedence range 12-12.
+   *
+   * @return
+   */
+  private def parseUnaryMinusExpression(): Either[String, Expression] =
+    for expression <- if check(TokenKind.MINUS)
+    then for {
+        _ <- consume(TokenKind.MINUS)
+        innerExpression <- parseUnaryMinusExpression()
+      } yield UnaryExpression("-", innerExpression)
+    else parseExponentiation()
+    yield expression
+
+  /**
+   * Parse an exponentiation operator (right-associatively).
+   * The exponentiation has precedence range 14-14 (and is implemented right-associatively).
+   *
+   * @return
+   */
+  private def parseExponentiation(): Either[String, Expression] = for {
+    lhs <- parsePostfix()
+    result <- if check(TokenKind.EXP) then for {
+        _ <- consume(TokenKind.EXP)
+        rhs <- parseExponentiation() /* right-associative */
+      } yield BinaryExpression("^", lhs, rhs)
+      else Right(lhs)
+  } yield result
+
+  /**
+   * Parse a postfix operation (such as the prime operator),
+   * function application or record field access.
+   *
+   * According to the "Summary of TLA+" document:
+   * - the prime operator has precedence range 15-15
+   * - the record field access operator has precedence range 17-17
+   * - function applications are not mentioned.
+   *
+   * However, for now they are all implemented with the same precedence.
+   * This might be changed in the future!
+   *
+   * G.GeneralPostfixOp := InstancePrefix PrimeOperator
+   *
+   * Postfix := Expression GeneralPostfixOp
+   *
+   * @return
+   */
+  private def parsePostfix(): Either[String, Expression] = {
+    for {
+      primaryExpr <- parsePrimaryExpression()
+      result <- {
+        /**
+         * Recursive loop for the inspection if there are any postfix operators
+         * behind an expression, which we have already parsed.
+         *
+         * @param primaryOrPostfixExpr A parsed expression.
+         * @return The given parsed expression, or a postfix expression applied to it.
+         */
+        def loop(primaryOrPostfixExpr: Expression): Either[String, Expression] = {
+          // If we encounter a left square bracket, we know that
+          // the arguments of a function application should follow.
+          if check(TokenKind.LEFT_SQUARE_BRACKET) then for {
+            // Here we parse the arguments of the function. (The function itself is already parsed.)
+            fnApplication <- parseFunctionApplicationArguments(primaryOrPostfixExpr)
+            // Before returning the function application expression, we look for further postfix operators.
+            // This is the recursive call. The result of the call might be the function application or another
+            // postfix expression.
+            finalResult <- loop(fnApplication)
+          } yield finalResult
+          // If we encounter the dot operator, we know that we are looking at a field access.
+          else if check(TokenKind.DOT) then for {
+            // Here we parse the rhs of the field access. (The lhs itself is already parsed.)
+            fieldAccess <- parseFieldAccessRHS(primaryOrPostfixExpr)
+            // Here we look for further postfix operators
+            finalResult <- loop(fieldAccess)
+          } yield finalResult
+          // If we encounter the prime operator, we know that we are looking at a primed expression.
+          else if check(TokenKind.PRIME) then for {
+            // Here we parse the primed expression.
+            primedExpr <- parsePrimedExpression(primaryOrPostfixExpr)
+            // And look for further postfix operators.
+            finalResult <- loop(primedExpr)
+          } yield finalResult
+          // If we did not encounter any postfix operators, we simply return the input expression.
+          // This is the bottom of the recursion.
+          else Right(primaryOrPostfixExpr)
+        }
+
+        // We start looping with our parsed primary expression.
+        loop(primaryExpr)
+      }
+    } yield result
+  }
+
+  private def parsePrimedExpression(expression: Expression) : Either[String, Expression] =
+    for _ <- consume(TokenKind.PRIME) yield PrimedExpression(expression)
+
+  /**
+   * Parse a field access expression. The field access is a level 17 infix operator,
+   * so it binds stronger than all other operators. This is the reason for calling it
+   * directly before the parsing of function applications and primary expressions.
+   *
+   * FieldAccess := Expression `.` Expression
+   *
+   * @return The field access as an AST-Node.
+   */
+  /*
+  private def parseFieldAccessExpression(): Either[String, Expression] =
+    for {
+      expression <- parseFunctionApplication()
+      maybeFieldAccess <- parseFieldAccessRHS(expression)
+    } yield maybeFieldAccess
+  */
+
+  private def parseFieldAccessRHS(maybeFieldAccessLHS: Expression): Either[String, Expression] = {
+    if check(TokenKind.DOT) then for {
+      _ <- consume(TokenKind.DOT)
+      rhsExpression <- parseIdentifier()
+      modifiedExpression <- parseFieldAccessRHS(BinaryExpression(".", maybeFieldAccessLHS, rhsExpression))
+    } yield modifiedExpression
+    else Right(maybeFieldAccessLHS)
+  }
+
+  /**
    * Parse a function application.
    *
    * FunctionApplication := Expression [ '[' Expression [',' Expression]* ']' ]?
    *
    * @return The function application as an AST-Node.
    */
+  /*
   private def parseFunctionApplication(): Either[String, Expression] =
     for {
       expression <- parsePrimaryExpression()
       maybeFunctionApplication <- parseFunctionApplicationArguments(expression)
     } yield maybeFunctionApplication
+  private def parseFunctionApplication(expression: Expression): Either[String, Expression] =
+    for maybeFunctionApplication <- parseFunctionApplicationArguments(expression) yield maybeFunctionApplication
+  */
 
   /**
    * Parses the arguments of a function application.
@@ -253,7 +693,7 @@ class Parser(lexer: Tokenizer) {
   /**
    * Parses a primary expression.
    *
-   * PrimaryExpr := OperatorApplication | Identifier | Literal | Set
+   * PrimaryExpr := OperatorApplication | Identifier | Literal | Set | Function | Tuple
    *
    * @return The primary expression as an AST-Node.
    */
@@ -264,8 +704,20 @@ class Parser(lexer: Tokenizer) {
       then for identifier <- parseIdentifier() yield identifier
     else if checkLiteral()
       then for literal <- parseLiteral() yield literal
+    else if check(TokenKind.EXISTS) || check(TokenKind.FORALL)
+      then for quantifiedExpression <- parseQuantifiedExpression() yield quantifiedExpression
+    else if check(TokenKind.CHOOSE)
+      then for chooseExpression <- parseChooseExpression() yield chooseExpression
     else if check(TokenKind.LEFT_CURLY_BRACKET)
       then for set <- parseSet() yield set
+    else if check(TokenKind.LEFT_SQUARE_BRACKET)
+      then for function <- parseFunction() yield function
+    else if check(TokenKind.LEFT_ANGLE_BRACKET)
+      then for tuple <- parseTuple() yield tuple
+    else if check(TokenKind.LEFT_ROUND_BRACKET)
+      then for parenExpression <- parseParenthesizedExpression() yield parenExpression
+    else if check(TokenKind.IF)
+      then for ifThenElse <- parseIfThenElse() yield ifThenElse
     else Left("Syntax Error: Expression expected")
 
   /**
@@ -287,45 +739,142 @@ class Parser(lexer: Tokenizer) {
     } yield OperatorApplication(operatorName.value, operands)
 
   /**
+   * Parse an identifier.
+   *
+   * @return Identifier as AST-Node.
+   */
+  def parseIdentifier(): Either[String, Identifier] = {
+    for token <- consume(TokenKind.IDENTIFIER) yield Identifier(token.value)
+  }
+
+  /**
+   * Parses a comma-separated list of identifiers.
+   *
+   * @return A list of parsed identifier tokens.
+   */
+  private def parseCommaListOfIdentifiers: Either[String, List[Identifier]] =
+    parseCommaList[Identifier](() => parseIdentifier())
+
+  /**
+   * Check if the next token is a literal.
+   *
+   * @return True if the next token is a literal, else false.
+   */
+  private def checkLiteral(): Boolean = {
+    check(TokenKind.TRUE)
+      || check(TokenKind.FALSE)
+      || check(TokenKind.BOOLEAN)
+      || check(TokenKind.INTEGER)
+      || check(TokenKind.STRING)
+  }
+
+  /**
+   * Parse a literal.
+   *
+   * literal := 'TRUE', 'FALSE', 'BOOLEAN', Integer, String
+   *
+   * @return Literal as AST-Node.
+   */
+  def parseLiteral(): Either[String, Literal] = {
+    if check(TokenKind.TRUE)
+    then for token <- consume(TokenKind.TRUE) yield Literal(token.value == "TRUE")
+    else if check(TokenKind.FALSE)
+    then for token <- consume(TokenKind.FALSE) yield Literal(token.value != "FALSE")
+    else if check(TokenKind.BOOLEAN)
+    then for token <- consume(TokenKind.BOOLEAN) yield Literal(token.value)
+    else if check(TokenKind.INTEGER)
+    then for token <- consume(TokenKind.INTEGER) yield Literal(Integer.valueOf(token.value))
+    else if check(TokenKind.STRING)
+    then for token <- consume(TokenKind.STRING) yield Literal(token.value)
+    else Left("Error: Literal not recognized")
+  }
+
+  /**
+   * Parse a (bounded) quantified expression.
+   *
+   * BoundedQuantifiedExpression := ['\E' | '\A'] CommaList(QuantifierBound) ':' Expression
+   *
+   * QuantifiedExpression := ['\E' | '\A'] CommaList(Identifier) ':' Expression
+   *
+   * @return The filtered set an AST-Node.
+   */
+  private def parseQuantifiedExpression(): Either[String, BoundedQuantifiedExpression | QuantifiedExpression] =
+    for {
+      token <- if check(TokenKind.EXISTS) then consume(TokenKind.EXISTS) else consume(TokenKind.FORALL)
+      expr <- if checkCommaListOfQuantifierBounds()
+        then for {
+          binders <- parseCommaListOfQuantifierBounds()
+          _ <- consume(TokenKind.COLON)
+          body <- parseExpression()
+        } yield BoundedQuantifiedExpression(token.value, binders, body)
+        else for {
+          binders <- parseCommaListOfIdentifiers
+          _ <- consume(TokenKind.COLON)
+          body <- parseExpression()
+        } yield QuantifiedExpression(token.value, binders, body)
+    } yield expr
+
+  /**
+   * Parse a CHOOSE expression.
+   *
+   * ChooseExpression := 'CHOOSE' Identifier ['\in' Expression]? ':' Expression
+   *
+   * @return The filtered set an AST-Node.
+   */
+  private def parseChooseExpression(): Either[String, ChooseExpression] =
+    for {
+      _ <- consume(TokenKind.CHOOSE)
+      variable <- parseIdentifierOrTuple()
+      domain <- if check(TokenKind.SET_IN)
+      then for {
+          _ <- consume(TokenKind.SET_IN)
+          domainExpression <- parseExpression()
+        } yield domainExpression
+      else Right(null)
+      _ <- consume(TokenKind.COLON)
+      predicate <- parseExpression()
+    } yield ChooseExpression(variable, domain, predicate)
+
+  /**
    * Parses a set.
    *
-   * Set := FilteredSet | MappedSet | ExplicitlyGivenSet
+   * Set := ExplicitSet | BoundedSetComprehension | QuantifiedSetComprehension
    *
    * @return The set as an AST-Node.
    */
   private def parseSet(): Either[String, Set] =
     if check(List(TokenKind.LEFT_CURLY_BRACKET, TokenKind.IDENTIFIER, TokenKind.SET_IN))
-      then parseFilteredSetConstructor()
-    else parseExplicitOrMappedSet()
+      then parseBoundedSetComprehension()
+    else parseExplicitSetOrQuantifiedSetComprehension()
 
   /**
    * Parses a filtered set constructor.
    *
-   * FilteredSetConstructor := '{' Identifier '\in' Expression : Expression '}'
+   * BoundedSetComprehension := '{' Identifier '\in' Expression ':' Expression '}'
    *
    * @return The filtered set an AST-Node.
    */
-  private def parseFilteredSetConstructor(): Either[String, FilteredSet] =
+  private def parseBoundedSetComprehension(): Either[String, BoundedSetComprehension] =
     for {
       _ <- consume(TokenKind.LEFT_CURLY_BRACKET)
-      variable <- parseIdentifier()
+      variable <- parseIdentifierOrTuple()
       _ <- consume(TokenKind.SET_IN)
       domain <- parseExpression()
       _ <- consume(TokenKind.COLON)
       mappingExpression <- parseExpression()
       _ <- consume(TokenKind.RIGHT_CURLY_BRACKET)
-    } yield FilteredSet(variable, domain, mappingExpression)
+    } yield BoundedSetComprehension(variable, domain, mappingExpression)
 
   /**
-   * Parses a mapped or an explicitly given set.
+   * Parse an explicitly given set or a quantified comprehension.
    *
-   * MappedSetConstructor := '{' Expression : Identifier '\in' Expression '}'
+   * ExplicitSet := '{' CommaList(Expression)? '}'
    *
-   * ExplicitlyGivenSet := '{' CommaList(Expression)? '}'
+   * QuantifiedSetComprehension := '{' Expression ':' Identifier '\in' Expression '}'
    *
-   * @return The mapped or explicitly-given set as an AST-Node.
+   * @return An explicitly-given set or a quantified set comprehension as an AST-Node.
    */
-  private def parseExplicitOrMappedSet(): Either[String, Set] =
+  private def parseExplicitSetOrQuantifiedSetComprehension(): Either[String, Set] =
     for {
       _ <- consume(TokenKind.LEFT_CURLY_BRACKET)
       set <- {
@@ -346,17 +895,15 @@ class Parser(lexer: Tokenizer) {
           for {
             // For this, we first parse the first expression
             firstExpr <- parseExpression()
-            explicitOrMappedSet <- {
+            explicitSetOrQuantifiedComprehension <- {
               // And we check if after the expression we have a colon
-              // If this is the case, we know that we have a mapped set
+              // If this is the case, we know that we have a quantified set comprehension.
               if check(TokenKind.COLON) then for {
-                // Here we parse the rest as if we are parsing a mapped set
+                // Here we parse the rest as if we are parsing a quantified set comprehension.
                 _ <- consume(TokenKind.COLON)
-                variable <- parseIdentifier()
-                _ <- consume(TokenKind.SET_IN)
-                expression <- parseExpression()
+                quantifierBounds <- parseCommaListOfQuantifierBounds()
                 _ <- consume(TokenKind.RIGHT_CURLY_BRACKET)
-              } yield MappedSet(firstExpr, variable, expression)
+              } yield QuantifiedSetComprehension(firstExpr, quantifierBounds)
               // If we find a comma instead, we know that we have
               // an explicitly given set of expressions, and we can
               // simply parse them
@@ -373,13 +920,334 @@ class Parser(lexer: Tokenizer) {
                 _ <- consume(TokenKind.RIGHT_CURLY_BRACKET)
               } yield ExplicitSet(List(firstExpr))
             }
-          } yield explicitOrMappedSet
+          } yield explicitSetOrQuantifiedComprehension
         }
       }
     } yield set
 
+  /**
+   * Parse an identifier tuple.
+   *
+   * IdentifierTuple := '<<' CommaList(Identifier) '>>'
+   *
+   * @return
+   */
+  private def parseIdentifierTuple(): Either[String, IdentifierTuple] =
+    for {
+      _ <- consume(TokenKind.LEFT_ANGLE_BRACKET)
+      identifiers <- parseCommaListOfIdentifiers
+      _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
+    } yield IdentifierTuple(identifiers)
 
+  /**
+   * Parse an identifier or a tuple.
+   *
+   * IdentifierOrTuple := Identifier | IdentifierTuple
+   *
+   * @return
+   */
+  private def parseIdentifierOrTuple(): Either[String, Identifier | IdentifierTuple] =
+    if check(TokenKind.IDENTIFIER)
+      then parseIdentifier()
+    else if check(TokenKind.LEFT_ANGLE_BRACKET)
+      then parseIdentifierTuple()
+    else Left("Syntax Error: Identifier or tuple not recognized.")
 
+  /**
+   * Check if the next tokens are part of a quantifier bound.
+   * Here check for at most 3 identifiers!
+   *
+   * Examples for quantifier bounds:
+   * - n \in Nat
+   * - n, m \in Nat
+   * - n \in Nat, m \in Nat
+   * - << n, m >> \in Nat \times Nat
+   *
+   * @return True if the next tokens are part of a quantifier bound.
+   */
+  private def checkCommaListOfQuantifierBounds(): Boolean = {
+    if check(TokenKind.IDENTIFIER)
+    then check(List(TokenKind.IDENTIFIER, TokenKind.SET_IN))
+      || check(List(TokenKind.IDENTIFIER, TokenKind.COMMA, TokenKind.IDENTIFIER, TokenKind.SET_IN))
+      || check(List(TokenKind.IDENTIFIER, TokenKind.COMMA, TokenKind.IDENTIFIER, TokenKind.COMMA, TokenKind.IDENTIFIER, TokenKind.SET_IN))
+    else if check(TokenKind.LEFT_ANGLE_BRACKET)
+    then check(List(TokenKind.LEFT_ANGLE_BRACKET, TokenKind.IDENTIFIER, TokenKind.RIGHT_ANGLE_BRACKET, TokenKind.SET_IN))
+      || check(List(TokenKind.LEFT_ANGLE_BRACKET, TokenKind.IDENTIFIER, TokenKind.COMMA, TokenKind.IDENTIFIER, TokenKind.RIGHT_ANGLE_BRACKET, TokenKind.SET_IN))
+      || check(List(TokenKind.LEFT_ANGLE_BRACKET, TokenKind.IDENTIFIER, TokenKind.COMMA, TokenKind.IDENTIFIER, TokenKind.COMMA, TokenKind.IDENTIFIER, TokenKind.RIGHT_ANGLE_BRACKET, TokenKind.SET_IN))
+    else false
+  }
+
+  /**
+   * Parse a quantifier bound.
+   *
+   * QuantifierBound := [Identifier | CommaList(Identifier) | IdentifierTuple] '\in' Expression
+   *
+   * @return
+   */
+  private def parseQuantifierBound(): Either[String, QuantifierBound] =
+    for {
+      identifierOrTuple <- if check(List(TokenKind.IDENTIFIER, TokenKind.COMMA))
+        then parseCommaListOfIdentifiers
+        else parseIdentifierOrTuple()
+      _ <- consume(TokenKind.SET_IN)
+      expression <- parseExpression()
+    } yield QuantifierBound(identifierOrTuple, expression)
+
+  private def parseCommaListOfQuantifierBounds(): Either[String, List[QuantifierBound]] =
+    parseCommaList[QuantifierBound](() => parseQuantifierBound())
+
+  /**
+   * Parse an identifier to expression mapping.
+   *
+   * Mapping := Identifier '|->' Expression
+   *
+   * @return
+   */
+  private def parseMapping(): Either[String, Mapping] =
+    for {
+      identifier <- parseIdentifier()
+      _ <- consume(TokenKind.MAPS_TO)
+      expression <- parseExpression()
+    } yield Mapping(identifier, expression)
+
+  private def parseCommaListOfMappings(): Either[String, List[Mapping]] =
+    parseCommaList[Mapping](() => parseMapping())
+
+  /**
+   * Parse a record key to domain mapping.
+   *
+   * RecordKeyToDomainMapping := Identifier ':' Expression
+   *
+   * @return
+   */
+  private def parseRecordKeyToDomainMapping(): Either[String, Mapping] =
+    for {
+      identifier <- parseIdentifier()
+      _ <- consume(TokenKind.COLON)
+      expression <- parseExpression()
+    } yield Mapping(identifier, expression)
+
+  private def parseCommaListOfRecordKeyToDomainMappings(): Either[String, List[Mapping]] =
+    parseCommaList[Mapping](() => parseRecordKeyToDomainMapping())
+
+  /**
+   * Parse a function.
+   *
+   * Function :=  ExplicitFunction | BoundedMapping
+   *
+   * @return The function as an AST-Node.
+   */
+  private def parseFunction(): Either[String, Function] =
+    for {
+      _ <- consume(TokenKind.LEFT_SQUARE_BRACKET)
+      functionOrSetOfFunctions <- {
+        // First, we check if there is an explicit mapping of elements
+        // from a domain to an expression (e.g. [n \in Nat |-> n^2] ).
+        if checkCommaListOfQuantifierBounds()
+        then for {
+          quantifierBounds <- parseCommaListOfQuantifierBounds()
+          _ <- consume(TokenKind.MAPS_TO)
+          expression <- parseExpression()
+          _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
+        } yield BoundedMapping(quantifierBounds, expression)
+        else for {
+          // Otherwise, we need to parse the first expression and
+          // inspect it (and the following tokens) in order to know
+          // how to proceed with the parsing. This is because we need
+          // to create different AST nodes, depending on whether
+          // we see the `->`, `EXCEPT`, `|->` or `:` symbol after
+          // the first expression.
+          firstExpression <- parseExpression()
+          result <- {
+            // If we encounter `->`, we know that this is the set of
+            // all functions (as in A -> B). We can simply parse it.
+            if check(TokenKind.RIGHT_ARROW) then for {
+              _ <- consume(TokenKind.RIGHT_ARROW)
+              secondExpression <- parseExpression()
+              _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
+            } yield SetOfAllFunctions(firstExpression, secondExpression)
+            // If we encounter `EXCEPT`, we also know that a function
+            // update must follow.
+            else if check(TokenKind.EXCEPT) then for {
+              exceptExpression <- parseExceptExpression(firstExpression)
+            } yield exceptExpression
+            // Here we have 2 more cases:
+            // 1) The set of all records with specific keys and their domains
+            //    (e.g. [foo: {"FOO"}, bar: {"BAR"}] )
+            // 2) explicit mapping of identifiers to expressions
+            //    (e.g. [foo |-> "FOO", bar |-> "BAR"] )
+            else firstExpression match {
+              // Here we check for the set of all records with some specific
+              // keys and the corresponding key domains.
+              // E.g. [foo: {"FOO"}, bar: {"BAR"}].
+              case identifier: Identifier if check(TokenKind.COLON) =>
+                for {
+                  _ <- consume(TokenKind.COLON)
+                  secondExpression <- parseExpression()
+                  // Up to here, we have parse the first key to key domain mapping
+                  // Next, we check if there is a comma, and if yes we parse the rest.
+                  tailMappings <- if check(TokenKind.COMMA)
+                    then for {
+                      _ <- consume(TokenKind.COMMA)
+                      tailRecordKeyToKeyDomainMappings <- parseCommaListOfRecordKeyToDomainMappings()
+                    } yield tailRecordKeyToKeyDomainMappings
+                    else Right(Nil)
+                  _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
+                // Here we return the final AST-Node.
+                } yield SetOfAllRecords(List(Mapping(identifier, secondExpression)) ++ tailMappings)
+              // Next, we check for the set of explicit identifier to expression mappings.
+              // E.g. [foo |-> "FOO", bar |-> "BAR"].
+              case identifier: Identifier if check(TokenKind.MAPS_TO) =>
+                for {
+                  - <- consume(TokenKind.MAPS_TO)
+                  secondExpression <- parseExpression()
+                  // Up to here, we have parse the first key to expression mapping.
+                  // Next, we check if there is a comma, and if yes we parse the rest.
+                  tailMappings <- if check(TokenKind.COMMA)
+                    then for {
+                      _ <- consume(TokenKind.COMMA)
+                      mappings <- parseCommaListOfMappings()
+                    } yield mappings
+                    else Right(Nil)
+                  _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
+                // Here we return the final AST-Node.
+                } yield ExplicitFunction(List(Mapping(identifier, secondExpression)) ++ tailMappings)
+              // If we reach this point, we can not recognize the function,
+              // so we throw an error.
+              case default => Left("Syntax Error: Function not recognized")
+            }
+          }
+        } yield result
+      }
+    } yield functionOrSetOfFunctions
+
+  /**
+   * Parse an EXCEPT Expression.
+   *
+   * ExceptExpression := '[' Expression 'EXCEPT' CommaList(ExceptClause) ']'
+   *
+   * @param exceptTarget The except target (which is an expression and is already parsed).
+   * @return ExceptExpression as an AST node.
+   */
+  private def parseExceptExpression(exceptTarget: Expression): Either[String, ExceptExpression] =
+    for {
+      _ <- consume(TokenKind.EXCEPT)
+      exceptClauses <- parseCommaListOfExceptClauses()
+      _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
+    } yield ExceptExpression(exceptTarget, exceptClauses)
+
+  private def parseCommaListOfExceptClauses(): Either[String, List[ExceptClause]] =
+    parseCommaList[ExceptClause](() => parseExceptClause())
+
+  /**
+   * Parse an EXCEPT clause within an EXCEPT expression.
+   *
+   * ExceptClause := '!' SelectorPath '=' Expression
+   *
+   * @return The except clause as an AST node, with its selector path and value expression.
+   */
+  private def parseExceptClause(): Either[String, ExceptClause] =
+    for {
+      _ <- consume(TokenKind.BANG)
+      selector <- parseSelectorPath()
+      _ <- consume(TokenKind.EQ)
+      value <- parseExpression()
+    } yield ExceptClause(selector, value)
+
+  /**
+   * Parse a selector path within an EXCEPT clause.
+   *
+   * SelectorPath := [DotSelector | IndexSelector]*
+   *
+   * @return The selector path as an AST node.
+   */
+  private def parseSelectorPath(): Either[String, SelectorPath] = {
+    val selectorParts = new ListBuffer[SelectorPart]
+    while (check(TokenKind.DOT) || check(TokenKind.LEFT_SQUARE_BRACKET)) {
+      if check(TokenKind.DOT)
+        then parseDotSelector() match {
+          case Right(value) => selectorParts.addOne(value)
+          case Left(value) => return Left(value)
+        }
+        else parseIndexSelector() match {
+          case Right(value) => selectorParts.addOne(value)
+          case Left(value) => return Left(value)
+        }
+    }
+    Right(SelectorPath(selectorParts.toList))
+  }
+
+  /**
+   * Parse a dot selector within an EXCEPT clause.
+   *
+   * DotSelector := '.' Identifier
+   *
+   * @return The dot selector as an AST node with its identifier.
+   */
+  private def parseDotSelector(): Either[String, DotSelector] =
+    for {
+      _ <- consume(TokenKind.DOT)
+      name <- parseIdentifier()
+    } yield DotSelector(name)
+
+  /**
+   * Parse an index selection within an EXCEPT clause.
+   *
+   * IndexSelector := '[' CommaList(Expression) ']'
+   *
+   * @return The index selection as an AST node with its indices.
+   */
+  private def parseIndexSelector(): Either[String, IndexSelector] =
+    for {
+      _ <- consume(TokenKind.LEFT_SQUARE_BRACKET)
+      indices <- parseCommaListOfExpressions
+      _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
+    } yield IndexSelector(indices)
+
+  /**
+   * Parse a TLA+ list (aka. a tuple).
+   *
+   * Tuple := '<<' CommaList(Expression) '>>'
+   *
+   * @return The tuple as an AST node with its elements.
+   */
+  private def parseTuple(): Either[String, Tuple] =
+    for {
+      _ <- consume(TokenKind.LEFT_ANGLE_BRACKET)
+      expressions <- parseCommaListOfExpressions
+      _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
+    } yield Tuple(expressions)
+
+  /**
+   * Parse a parenthesized expression.
+   *
+   * ParenthesizedExpression := '(' Expression ')'
+   *
+   * @return The parenthesized expression as an AST node.
+   */
+  private def parseParenthesizedExpression(): Either[String, ParenthesizedExpression] =
+    for {
+      _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
+      expression <- parseExpression()
+      _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
+    } yield ParenthesizedExpression(expression)
+
+  /**
+   * Parse an IF-THEN-ELSE expression.
+   *
+   * IfThenElse := 'IF' Expression 'THEN' Expression 'ELSE' Expression
+   *
+   * @return
+   */
+  private def parseIfThenElse(): Either[String, IfThenElse] =
+    for {
+      _ <- consume(TokenKind.IF)
+      cond <- parseExpression()
+      _ <- consume(TokenKind.THEN)
+      thenExpr <- parseExpression()
+      _ <- consume(TokenKind.ELSE)
+      elseExpr <- parseExpression()
+    } yield IfThenElse(cond, thenExpr, elseExpr)
 
   /**
    * Parse a TLA+ module.
