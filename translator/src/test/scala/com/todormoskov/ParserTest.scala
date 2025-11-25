@@ -205,6 +205,115 @@ class ParserTest extends AnyFunSuite {
     )
   }
 
+  test("Parses function definitions with one parameter and one domain") {
+    val inputSpec =
+      """f[x \in S] == x + 1""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseFunctionDefinition().toOption.get
+    assert(ast ==
+      FunctionDefinition(
+        Identifier("f"),
+        List(
+          QuantifierBound(
+            Identifier("x"),
+            Identifier("S")
+          )
+        ),
+        BinaryExpression(
+          "+",
+          Identifier("x"),
+          Literal(1)
+        )
+      )
+    )
+  }
+
+  test("Parses function definitions with two parameters and separate bounds") {
+    val inputSpec =
+      """f[x \in S, y \in T] == << x, y >>""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseFunctionDefinition().toOption.get
+    assert(ast ==
+      FunctionDefinition(
+        Identifier("f"),
+        List(
+          QuantifierBound(
+            Identifier("x"),
+            Identifier("S")
+          ),
+          QuantifierBound(
+            Identifier("y"),
+            Identifier("T")
+          )
+        ),
+        Tuple(
+          List(
+            Identifier("x"),
+            Identifier("y")
+          )
+        )
+      )
+    )
+  }
+
+  test("Parses function definitions with parameters using a single comma-list bound") {
+    val inputSpec =
+      """h[i, j \in 1..n] == i * j""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseFunctionDefinition().toOption.get
+    assert(ast ==
+      FunctionDefinition(
+        Identifier("h"),
+        List(
+          QuantifierBound(
+            List(
+              Identifier("i"),
+              Identifier("j")
+            ),
+            BinaryExpression(
+              "..",
+              Literal(1),
+              Identifier("n")
+            )
+          )
+        ),
+        BinaryExpression(
+          "*",
+          Identifier("i"),
+          Identifier("j")
+        )
+      )
+    )
+  }
+
+  test("Parses function definitions with tuple parameter bound") {
+    val inputSpec =
+      """addPair[<<i, j>> \in Dom] == i + j""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseFunctionDefinition().toOption.get
+    assert(ast ==
+      FunctionDefinition(
+        Identifier("addPair"),
+        List(
+          QuantifierBound(
+            IdentifierTuple(
+              List(
+                Identifier("i"),
+                Identifier("j")
+              )
+            ),
+            Identifier("Dom")
+          )
+        ),
+        BinaryExpression(
+          "+",
+          Identifier("i"),
+          Identifier("j")
+        )
+      )
+    )
+  }
+
   test("Parses operator applications") {
     val inputSpec =
       """foo""".stripMargin

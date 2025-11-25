@@ -48,6 +48,10 @@ case class OperatorDefinition(signature: NonFixLHS, body: Expression) extends AS
  */
 case class NonFixLHS(identifier: Identifier, arguments: List[Identifier | OperatorDeclaration]) extends AST
 /**
+ * FunctionDefinition :=  Identifier '[' CommaList(QuantifierBound) ']' '==' Expression
+ */
+case class FunctionDefinition(identifier: Identifier, arguments: List[QuantifierBound], body: Expression) extends AST
+/**
  * Single part of an instance prefix.
  *
  * InstancePrefixPart := Identifier [ '(' CommaList(Expression) ')' ]? '!'
@@ -435,6 +439,20 @@ class Parser(lexer: Tokenizer) {
    */
   private def parseCommaListOfIdentifiersAndOperatorDeclarations: Either[String, List[Identifier | OperatorDeclaration]] =
     parseCommaList[Identifier | OperatorDeclaration](() => parseIdentifierOrOperatorDeclaration())
+
+  /**
+   * Parse a function definition.
+   *
+   * FunctionDefinition :=  Identifier '[' CommaList(QuantifierBound) ']' '==' Expression
+   */
+  def parseFunctionDefinition(): Either[String, FunctionDefinition] = for {
+    identifier <- parseIdentifier()
+    _ <- consume(TokenKind.LEFT_SQUARE_BRACKET)
+    arguments <- parseCommaListOfQuantifierBounds()
+    _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
+    _ <- consume(TokenKind.DEFINE)
+    body <- parseExpression()
+  } yield FunctionDefinition(identifier, arguments, body)
 
   /**
    * Parse an expression.
