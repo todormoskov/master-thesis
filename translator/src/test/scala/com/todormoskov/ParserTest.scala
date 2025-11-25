@@ -73,7 +73,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """VARIABLES x, y, z""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseVariableDeclaration().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
     assert(ast == VariableDeclaration(List(Identifier("x"), Identifier("y"), Identifier("z"))))
   }
 
@@ -81,7 +81,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """CONSTANTS X, Y, Z""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseConstantDeclaration().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
     assert(ast ==
       ConstantDeclaration(
         Token(TokenKind.CONSTANTS, "CONSTANTS"),
@@ -98,7 +98,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """CONSTANTS F(_, _, _)""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseConstantDeclaration().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
     assert(ast ==
       ConstantDeclaration(
         Token(TokenKind.CONSTANTS, "CONSTANTS"),
@@ -120,7 +120,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """F == 42""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseOperatorDefinition().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
     assert(ast ==
       OperatorDefinition(
         NonFixLHS(
@@ -136,7 +136,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """Add(x, y) == x + y""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseOperatorDefinition().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
     assert(ast ==
       OperatorDefinition(
         NonFixLHS(
@@ -159,7 +159,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """Compose(f(_, _), g(_, _), x) == f(g(x, x), g(x, x))""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseOperatorDefinition().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
     assert(ast ==
       OperatorDefinition(
         NonFixLHS(
@@ -209,7 +209,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """f[x \in S] == x + 1""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseFunctionDefinition().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
     assert(ast ==
       FunctionDefinition(
         Identifier("f"),
@@ -232,7 +232,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """f[x \in S, y \in T] == << x, y >>""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseFunctionDefinition().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
     assert(ast ==
       FunctionDefinition(
         Identifier("f"),
@@ -260,7 +260,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """h[i, j \in 1..n] == i * j""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseFunctionDefinition().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
     assert(ast ==
       FunctionDefinition(
         Identifier("h"),
@@ -290,7 +290,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """addPair[<<i, j>> \in Dom] == i + j""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseFunctionDefinition().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
     assert(ast ==
       FunctionDefinition(
         Identifier("addPair"),
@@ -309,6 +309,81 @@ class ParserTest extends AnyFunSuite {
           "+",
           Identifier("i"),
           Identifier("j")
+        )
+      )
+    )
+  }
+
+  test("Parses INSTANCE statements") {
+    val inputSpec =
+      """INSTANCE M WITH foo <- myFoo""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
+    assert(ast ==
+      Instance(
+        Identifier("M"),
+        List(
+          Substitution(
+            Identifier("foo"),
+            Identifier("myFoo")
+          )
+        )
+      )
+    )
+  }
+
+  test("Parses module definition with INSTANCE") {
+    val inputSpec =
+      """InstantiatedModule == INSTANCE M WITH foo <- myFoo""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
+    assert(ast ==
+      ModuleDefinition(
+        NonFixLHS(
+          Identifier("InstantiatedModule"),
+          Nil
+        ),
+        Instance(
+          Identifier("M"),
+          List(
+            Substitution(
+              Identifier("foo"),
+              Identifier("myFoo")
+            )
+          )
+        )
+      )
+    )
+  }
+
+  test("Parses assumptions") {
+    val inputSpec =
+      """ASSUME foo > 0 """.stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseAssumption().toOption.get
+    assert(ast ==
+      Assumption(
+        Token(TokenKind.ASSUME, "ASSUME"),
+        BinaryExpression(
+          ">",
+          Identifier("foo"),
+          Literal(0)
+        )
+      )
+    )
+  }
+
+  test("Parses theorems") {
+    val inputSpec =
+      """THEOREM foo > 0""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
+    assert(ast ==
+      Theorem(
+        BinaryExpression(
+          ">",
+          Identifier("foo"),
+          Literal(0)
         )
       )
     )

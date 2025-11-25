@@ -7,17 +7,32 @@ import scala.collection.mutable.ListBuffer
 sealed trait AST
 case class ExtendsStatement(extendedModules: List[Identifier]) extends AST
 /**
+ * ModuleUnit trait for the TLA+ declarations and definitions.
+ *
+ * ModuleUnit := VariableDeclaration
+ *            | ConstantDeclaration
+ *            | ['LOCAL']? OperatorDefinition
+ *            | ['LOCAL']? FunctionDefinition
+ *            | ['LOCAL']? Instance
+ *            | ['LOCAL']? ModuleDefinition
+ *            | Assumption
+ *            | Theorem
+ *            | Module
+ *            | MinusSeparator ( = AtLeast4("-"))
+ */
+sealed trait ModuleUnit extends AST
+/**
  * Variable declarations.
  *
  * VariableDeclaration := ['VARIABLE' | 'VARIABLES'] CommaList(Identifier)
  */
-case class VariableDeclaration(variables: List[Identifier]) extends AST
+case class VariableDeclaration(variables: List[Identifier]) extends ModuleUnit
 /**
  * Constant declarations.
  *
  * ConstantDeclaration := ['CONSTANT' | 'CONSTANTS'] CommaList(OperatorDeclaration)
  */
-case class ConstantDeclaration(constantToken: Token, constants: List[OperatorDeclaration]) extends AST
+case class ConstantDeclaration(constantToken: Token, constants: List[OperatorDeclaration]) extends ModuleUnit
 /**
  * The declaration of a single operator.
  *
@@ -31,6 +46,15 @@ case class ConstantDeclaration(constantToken: Token, constants: List[OperatorDec
  */
 case class OperatorDeclaration(operator: Identifier | Token, arguments: List[Token]) extends AST
 /**
+ * Local definitions.
+ *
+ * LocalDefinition := ['LOCAL']? OperatorDefinition
+ *                 | ['LOCAL']? FunctionDefinition
+ *                 | ['LOCAL']? Instance
+ *                 | ['LOCAL']? ModuleDefinition
+ */
+case class LocalDefinition(definition: OperatorDefinition | FunctionDefinition | Instance | ModuleDefinition) extends ModuleUnit
+/**
  * OperatorDefinition :=  ( NonFixLHS
  *                        | PrefixOp Identifier
  *                        | Identifier InfixOp Identifier
@@ -40,7 +64,7 @@ case class OperatorDeclaration(operator: Identifier | Token, arguments: List[Tok
  *
  * Prefix, infix and postfix operator definitions are currently not supported!
  */
-case class OperatorDefinition(signature: NonFixLHS, body: Expression) extends AST
+case class OperatorDefinition(signature: NonFixLHS, body: Expression) extends ModuleUnit
 /**
  * Non-fix left-hand-side of an operator definition.
  *
@@ -50,7 +74,15 @@ case class NonFixLHS(identifier: Identifier, arguments: List[Identifier | Operat
 /**
  * FunctionDefinition :=  Identifier '[' CommaList(QuantifierBound) ']' '==' Expression
  */
-case class FunctionDefinition(identifier: Identifier, arguments: List[QuantifierBound], body: Expression) extends AST
+case class FunctionDefinition(identifier: Identifier, arguments: List[QuantifierBound], body: Expression) extends ModuleUnit
+/**
+ * Instance := 'INSTANCE' Identifier ['WITH' CommaList(Substitution)]
+ */
+case class Instance(identifier: Identifier, substitutions: List[Substitution]) extends ModuleUnit
+/**
+ * Substitution := (Identifier | PrefixOp | InfixOp | PostfixOp) '<-' Argument
+ */
+case class Substitution(identifier: Identifier | Token, arguments: Expression) extends AST
 /**
  * Single part of an instance prefix.
  *
@@ -96,6 +128,18 @@ case class GeneralInfixOp(prefix: InstancePrefix, infixOp: String) extends AST
  * General postfix operators are not expressions on their own, only AST nodes!
  */
 case class GeneralPostfixOp(prefix: InstancePrefix, postfixOp: String) extends AST
+/**
+ * ModuleDefinition := NonFixLHS '==' Instance
+ */
+case class ModuleDefinition(signature: NonFixLHS, instance: Instance) extends ModuleUnit
+/**
+ * Assumption ::= ['ASSUME' | 'ASSUMPTION' | 'AXIOM'] Expression
+ */
+case class Assumption(token: Token, expression: Expression) extends ModuleUnit
+/**
+ * Theorem ::= 'THEOREM' Expression
+ */
+case class Theorem(expression: Expression) extends ModuleUnit
 
 /**
  * Expression trait.
@@ -324,13 +368,66 @@ class Parser(lexer: Tokenizer) {
     else Right(ExtendsStatement(Nil))
 
   /**
+   * Parse a single module unit.
+   *
+   * Unit := VariableDeclaration
+   *        | ConstantDeclaration
+   *        | ['LOCAL']? OperatorDefinition
+   *        | ['LOCAL']? FunctionDefinition
+   *        | ['LOCAL']? Instance
+   *        | ['LOCAL']? ModuleDefinition
+   *        | Assumption
+   *        | Theorem
+   *        | Module
+   *        | MinusSeparator ( = AtLeast4("-"))
+   */
+  def parseModuleUnit(): Either[String, ModuleUnit] = {
+    lexer.peek() match {
+      case Token(TokenKind.VARIABLE, _) => parseVariableDeclaration()
+      case Token(TokenKind.VARIABLES, _) => parseVariableDeclaration()
+      case Token(TokenKind.CONSTANT, _) => parseConstantDeclaration()
+      case Token(TokenKind.CONSTANTS, _) => parseConstantDeclaration()
+      case Token(TokenKind.LOCAL, _) => parseLocalDefinition()
+      case Token(TokenKind.IDENTIFIER, _) => parseDefinition()
+      case Token(TokenKind.INSTANCE, _) => parseInstance()
+      case Token(TokenKind.ASSUME, _) => parseAssumption()
+      case Token(TokenKind.THEOREM, _) => parseTheorem()
+      case Token(TokenKind.MINUS_SEPARATOR, _) => ???
+      case _ => Left("Syntax Error: Module unit expected")
+    }
+  }
+
+  /**
+   * Parses a local definition.
+   * @return
+   */
+  private def parseLocalDefinition(): Either[String, LocalDefinition] =
+    for {
+      _ <- consume(TokenKind.LOCAL)
+      moduleUnit <- parseDefinition()
+    } yield LocalDefinition(moduleUnit)
+
+  /**
+   * Parses an operator, function, instance of module definition.
+   */
+  private def parseDefinition(): Either[String, OperatorDefinition | FunctionDefinition | Instance | ModuleDefinition] =
+    lexer.peek() match {
+      case Token(TokenKind.IDENTIFIER, _) =>
+        if check(List(TokenKind.IDENTIFIER, TokenKind.LEFT_SQUARE_BRACKET))
+        then parseFunctionDefinition()
+        else parseOperatorDefinitionOrModuleDefinition()
+      case Token(TokenKind.INSTANCE, _) => parseInstance()
+      case _ => Left("Syntax Error: Definition expected")
+    }
+
+  /**
    * Parse a variable declaration.
    *
    * [ ['VARIABLE' | 'VARIABLES'] CommaList(Identifier)
    *
    * @return
    */
-  def parseVariableDeclaration(): Either[String, VariableDeclaration] =
+  private def parseVariableDeclaration(): Either[String, VariableDeclaration] =
     if check(TokenKind.VARIABLE) || check(TokenKind.VARIABLES) then for {
       _ <- if check(TokenKind.VARIABLE) then consume(TokenKind.VARIABLE) else consume(TokenKind.VARIABLES)
       declaredVariables <- parseCommaListOfIdentifiers
@@ -344,7 +441,7 @@ class Parser(lexer: Tokenizer) {
    *
    * @return
    */
-  def parseConstantDeclaration(): Either[String, ConstantDeclaration] =
+  private def parseConstantDeclaration(): Either[String, ConstantDeclaration] =
     for {
       token <- if check(TokenKind.CONSTANT) then consume(TokenKind.CONSTANT) else consume(TokenKind.CONSTANTS)
       operatorDeclarations <- parseCommaListOfOperatorDeclarations
@@ -389,7 +486,12 @@ class Parser(lexer: Tokenizer) {
     parseCommaList[OperatorDeclaration](() => parseOperatorDeclaration())
 
   /**
-   * Parse an operator definition.
+   * Parse an operator definition or module definition.
+   * The reason for parsing them in the same method is
+   * that they both can start with a NonFixLHS. In that
+   * case we have to parse the '==' and look at the
+   * following symbol: If it is 'INSTANCE', then we have
+   * a module definition, otherwise an oprator definition.
    *
    * OperatorDefinition :=  ( NonFixLHS
    *                        | PrefixOp Identifier
@@ -399,13 +501,21 @@ class Parser(lexer: Tokenizer) {
    *                        Expression
    *
    * Prefix, infix and postfix operator definitions are currently not supported!
+   *
+   * ModuleDefinition := NonFixLHS '==' Instance
    */
-  def parseOperatorDefinition(): Either[String, OperatorDefinition] =
+  private def parseOperatorDefinitionOrModuleDefinition(): Either[String, OperatorDefinition | ModuleDefinition] =
     for {
       nonFixLHS <- parseNonFixLHS()
       _ <- consume(TokenKind.DEFINE)
-      body <- parseExpression()
-    } yield OperatorDefinition(nonFixLHS, body)
+      result <- if check(TokenKind.INSTANCE)
+        then for {
+          subs <- parseInstance()
+        } yield ModuleDefinition(nonFixLHS, subs)
+        else for {
+          body <- parseExpression()
+        } yield OperatorDefinition(nonFixLHS, body)
+    } yield result
 
   /**
    * Parses non-fix LHS.
@@ -445,7 +555,7 @@ class Parser(lexer: Tokenizer) {
    *
    * FunctionDefinition :=  Identifier '[' CommaList(QuantifierBound) ']' '==' Expression
    */
-  def parseFunctionDefinition(): Either[String, FunctionDefinition] = for {
+  private def parseFunctionDefinition(): Either[String, FunctionDefinition] = for {
     identifier <- parseIdentifier()
     _ <- consume(TokenKind.LEFT_SQUARE_BRACKET)
     arguments <- parseCommaListOfQuantifierBounds()
@@ -453,6 +563,81 @@ class Parser(lexer: Tokenizer) {
     _ <- consume(TokenKind.DEFINE)
     body <- parseExpression()
   } yield FunctionDefinition(identifier, arguments, body)
+
+  /**
+   * Parse an INSTANCE top-level statement.
+   *
+   * Instance := 'INSTANCE' Identifier ['WITH' CommaList(Substitution)]
+   *
+   */
+  private def parseInstance(): Either[String, Instance] =
+    for {
+      _ <- consume(TokenKind.INSTANCE)
+      identifier <- parseIdentifier()
+      substitutions <- if check(TokenKind.WITH)
+      then for {
+          _ <- consume(TokenKind.WITH)
+          subs <- parseCommaListOfSubstitutions()
+        } yield subs
+      else Right(Nil)
+    } yield Instance(identifier, substitutions)
+
+  /**
+   * Parse a substitution of identifier with some argument.
+   *
+   * Substitution := (Identifier | PrefixOp | InfixOp | PostfixOp) '<-' Argument
+   *
+   * Currently, we only allow the substitution of identifiers!
+   */
+  private def parseSubstitution(): Either[String, Substitution] =
+    for {
+      identifier <- parseIdentifier()
+      _ <- consume(TokenKind.LEFT_ARROW)
+      argument <- parseArgument()
+    } yield Substitution(identifier, argument)
+
+  /**
+   * Parse a comma-separated list of substitutions.
+   *
+   * @return A list of parsed substitutions.
+   */
+  private def parseCommaListOfSubstitutions(): Either[String, List[Substitution]] =
+    parseCommaList[Substitution](() => parseSubstitution())
+
+  /**
+   * Parse an argument.
+   *
+   * Argument := Expression
+   *          | GeneralPrefixOp
+   *          | GeneralInfixOp
+   *          | GeneralPostfixOp
+   *
+   * Currently, we only allow expressions as arguments!
+   */
+  private def parseArgument(): Either[String, Expression] =
+    parseExpression()
+
+  /**
+   * Parses an assumption.
+   *
+   * Assumption ::= ['ASSUME' | 'ASSUMPTION' | 'AXIOM'] Expression
+   */
+  def parseAssumption(): Either[String, Assumption] =
+    for {
+      token <- consume(TokenKind.ASSUME)
+      expression <- parseExpression()
+    } yield Assumption(token, expression)
+
+  /**
+   * Parses a theorem.
+   *
+   * Theorem ::= 'THEOREM' Expression
+   */
+  private def parseTheorem(): Either[String, Theorem] =
+    for {
+      token <- consume(TokenKind.THEOREM)
+      expression <- parseExpression()
+    } yield Theorem(expression)
 
   /**
    * Parse an expression.
