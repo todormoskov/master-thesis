@@ -11,7 +11,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """TRUE""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseLiteral().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
     assert(ast == Literal(true))
   }
 
@@ -20,7 +20,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """FALSE""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseLiteral().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
     assert(ast == Literal(false))
   }
 
@@ -29,7 +29,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """BOOLEAN""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseLiteral().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
     assert(ast == Literal("BOOLEAN"))
   }
 
@@ -38,7 +38,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """1""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseLiteral().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
     assert(ast == Literal(1))
   }
 
@@ -47,7 +47,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """ "someString" """.stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseLiteral().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
     assert(ast == Literal("someString"))
   }
 
@@ -56,7 +56,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """foo""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseIdentifier().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
     assert(ast == Identifier("foo"))
   }
 
@@ -69,20 +69,140 @@ class ParserTest extends AnyFunSuite {
     assert(ast == ExtendsStatement(List(Identifier("foo"), Identifier("bar"))))
   }
 
-  test("Parses CONSTANT declarations") {
-    val inputSpec =
-      """CONSTANTS X, Y, Z""".stripMargin
-
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseConstantDeclaration().toOption.get
-    assert(ast == ConstantDeclaration(List(Identifier("X"), Identifier("Y"), Identifier("Z"))))
-  }
-
   test("Parses VARIABLE declarations") {
     val inputSpec =
       """VARIABLES x, y, z""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseVariableDeclaration().toOption.get
     assert(ast == VariableDeclaration(List(Identifier("x"), Identifier("y"), Identifier("z"))))
+  }
+
+  test("Parses CONSTANT declarations") {
+    val inputSpec =
+      """CONSTANTS X, Y, Z""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseConstantDeclaration().toOption.get
+    assert(ast ==
+      ConstantDeclaration(
+        Token(TokenKind.CONSTANTS, "CONSTANTS"),
+        List(
+          OperatorDeclaration(Identifier("X"), Nil),
+          OperatorDeclaration(Identifier("Y"), Nil),
+          OperatorDeclaration(Identifier("Z"), Nil)
+        )
+      )
+    )
+  }
+
+  test("Parses CONSTANT declarations of operators with parameters") {
+    val inputSpec =
+      """CONSTANTS F(_, _, _)""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseConstantDeclaration().toOption.get
+    assert(ast ==
+      ConstantDeclaration(
+        Token(TokenKind.CONSTANTS, "CONSTANTS"),
+        List(
+          OperatorDeclaration(
+            Identifier("F"),
+            List(
+              Token(TokenKind.UNDERSCORE, "_"),
+              Token(TokenKind.UNDERSCORE, "_"),
+              Token(TokenKind.UNDERSCORE, "_")
+            )
+          ),
+        )
+      )
+    )
+  }
+
+  test("Parses operator definitions with no parameters") {
+    val inputSpec =
+      """F == 42""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseOperatorDefinition().toOption.get
+    assert(ast ==
+      OperatorDefinition(
+        NonFixLHS(
+          Identifier("F"),
+          Nil
+        ),
+        Literal(42)
+      )
+    )
+  }
+
+  test("Parses operator definitions with parameters") {
+    val inputSpec =
+      """Add(x, y) == x + y""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseOperatorDefinition().toOption.get
+    assert(ast ==
+      OperatorDefinition(
+        NonFixLHS(
+          Identifier("Add"),
+          List(
+            Identifier("x"),
+            Identifier("y")
+          )
+        ),
+        BinaryExpression(
+          "+",
+          Identifier("x"),
+          Identifier("y")
+        )
+      )
+    )
+  }
+
+  test("Parses higher-order operator definitions") {
+    val inputSpec =
+      """Compose(f(_, _), g(_, _), x) == f(g(x, x), g(x, x))""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseOperatorDefinition().toOption.get
+    assert(ast ==
+      OperatorDefinition(
+        NonFixLHS(
+          Identifier("Compose"),
+          List(
+            OperatorDeclaration(
+              Identifier("f"),
+              List(
+                Token(TokenKind.UNDERSCORE, "_"),
+                Token(TokenKind.UNDERSCORE, "_")
+              )
+            ),
+            OperatorDeclaration(
+              Identifier("g"),
+              List(
+                Token(TokenKind.UNDERSCORE, "_"),
+                Token(TokenKind.UNDERSCORE, "_")
+              )
+            ),
+            Identifier("x")
+          )
+        ),
+        IdentifierApplication(
+          Identifier("f"),
+          List(
+            IdentifierApplication(
+              Identifier("g"),
+              List(
+                Identifier("x"),
+                Identifier("x"),
+              )
+            ),
+            IdentifierApplication(
+              Identifier("g"),
+              List(
+                Identifier("x"),
+                Identifier("x"),
+              )
+            )
+          )
+        )
+      )
+    )
   }
 
   test("Parses operator applications") {
@@ -99,12 +219,14 @@ class ParserTest extends AnyFunSuite {
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
     assert(ast ==
-      OperatorApplication("foo",
-        List(OperatorApplication("bar",
-          List(
-            Literal(1),
-            Literal(2),
-            Literal(3))))))
+      IdentifierApplication(Identifier("foo"),
+        List(
+          IdentifierApplication(
+            Identifier("bar"),
+            List(
+              Literal(1),
+              Literal(2),
+              Literal(3))))))
   }
 
   test("Parses function applications with arguments") {
@@ -1196,8 +1318,8 @@ class ParserTest extends AnyFunSuite {
       QuantifiedExpression(
         "\\E",
         List(Identifier("x"), Identifier("y")),
-        OperatorApplication(
-          "P",
+        IdentifierApplication(
+          Identifier("P"),
           List(
             Identifier("x"),
             Identifier("y")
@@ -1218,8 +1340,8 @@ class ParserTest extends AnyFunSuite {
         List(
           QuantifierBound(Identifier("x"), Identifier("S")),
           QuantifierBound(Identifier("y"), Identifier("T"))),
-        OperatorApplication(
-          "P",
+        IdentifierApplication(
+          Identifier("P"),
           List(
             Identifier("x"),
             Identifier("y")
@@ -1286,6 +1408,114 @@ class ParserTest extends AnyFunSuite {
       ),
     )
   }
+
+  test("Parses weak-stuttering nodes") {
+    val inputSpec =
+      """[x' = x + 1]_x""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
+    assert(ast ==
+      WeakStuttering(
+        BinaryExpression(
+          "=",
+          PrimedExpression(Identifier("x")),
+          BinaryExpression(
+            "+",
+            Identifier("x"),
+            Literal(1)
+          )
+        ),
+        Identifier("x"),
+      ),
+    )
+  }
+
+  test("Parses strong-stuttering nodes") {
+    val inputSpec =
+      """<< x' = f(x) >>_x""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
+    assert(ast ==
+      StrongStuttering(
+        BinaryExpression(
+          "=",
+          PrimedExpression(Identifier("x")),
+          IdentifierApplication(
+            Identifier("f"),
+            List(
+              Identifier("x")
+            )
+          )
+        ),
+        Identifier("x"),
+      ),
+    )
+  }
+
+  test("Parses weak fairness expressions") {
+    val inputSpec =
+      """WF_v(A)""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
+    assert(ast ==
+      WeakFairness(
+        Identifier("v"),
+        Identifier("A")
+      ),
+    )
+  }
+
+  test("Parses strong fairness expressions") {
+    val inputSpec =
+      """SF_v(A)""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
+    assert(ast ==
+      StrongFairness(
+        Identifier("v"),
+        Identifier("A")
+      ),
+    )
+  }
+
+  test("Parses @ sign") {
+    val inputSpec =
+      """@""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
+    assert(ast ==
+      AtSign()
+    )
+  }
+
+  test("Parses general identifiers") {
+    val inputSpec =
+      """M!foo""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
+    assert(ast == GeneralIdentifier(
+      List(InstancePrefixPart(Identifier("M"), Nil)),
+      Identifier("foo")
+    ))
+  }
+
+  test("Parses general identifiers with arguments") {
+    val inputSpec =
+      """M(a, b)!foo""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
+    assert(ast == GeneralIdentifier(
+      List(
+        InstancePrefixPart(Identifier("M"),
+        List(
+          Identifier("a"),
+          Identifier("b")
+        )
+      )),
+      Identifier("foo")
+    ))
+  }
+
 
   /*
   private def parse(input: String): Either[String, Module] = {

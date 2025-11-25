@@ -127,6 +127,11 @@ object Lexer {
     UNKNOWN_OPERATOR,
     AT,
     AT_AT,
+    CIRCLE,
+    OPLUS,
+    OMINUS,
+    SQSUBSETEQ,
+    COLON_LT,
 
     EPC_VAR,
     EPC_ASSIGN,
@@ -297,6 +302,10 @@ object Lexer {
         }
         if (c == ':') {
           scanner.consume()
+          if (scanner.peek().isDefined && scanner.peek().get == '>') {
+            scanner.consume()
+            return Token(TokenKind.COLON_LT, ":>")
+          }
           if (scanner.peek().isDefined && scanner.peek().get == '=') {
             scanner.consume()
             return Token(TokenKind.EPC_ASSIGN, ":=")
@@ -339,6 +348,22 @@ object Lexer {
               optionChar = scanner.peek()
             }
             return consume(keepBuffer = true)
+          }
+          if (scanner.peek().isDefined && scanner.peek().get == '+') {
+            scanner.consume()
+            if (scanner.peek().isDefined && scanner.peek().get == ')') {
+              scanner.consume()
+              return Token(TokenKind.OPLUS, "(+)")
+            }
+            return Token(TokenKind.UNKNOWN_OPERATOR, "(+")
+          }
+          if (scanner.peek().isDefined && scanner.peek().get == '-') {
+            scanner.consume()
+            if (scanner.peek().isDefined && scanner.peek().get == ')') {
+              scanner.consume()
+              return Token(TokenKind.OMINUS, "(-)")
+            }
+            return Token(TokenKind.UNKNOWN_OPERATOR, "(-")
           }
           return Token(TokenKind.LEFT_ROUND_BRACKET, "(")
         }
@@ -527,6 +552,11 @@ object Lexer {
             case "\\" => Token(TokenKind.SET_DIFFERENCE, name)
             case "\\X" => Token(TokenKind.TIMES, name)
             case "\\times" => Token(TokenKind.TIMES, name)
+            case "\\o" => Token(TokenKind.CIRCLE, name)
+            case "\\circ" => Token(TokenKind.CIRCLE, name)
+            case "\\oplus" => Token(TokenKind.OPLUS, name)
+            case "\\ominus" => Token(TokenKind.OMINUS, name)
+            case "\\sqsubseteq" => Token(TokenKind.SQSUBSETEQ, name)
             case default => Token(TokenKind.BACKSLASH_OPERATOR, name)
           }
         }

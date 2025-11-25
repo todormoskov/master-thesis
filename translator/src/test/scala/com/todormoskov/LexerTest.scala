@@ -822,6 +822,124 @@ class LexerTest extends AnyFunSuite {
     )
   }
 
+  test("Recognizes the 'concatenation' notation (1)") {
+    val inputSpec =
+      """seq1 \o seq2""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.IDENTIFIER, "seq1"),
+        Token(TokenKind.CIRCLE, "\\o"),
+        Token(TokenKind.IDENTIFIER, "seq2"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes the 'concatenation' notation (2)") {
+    val inputSpec =
+      """seq1 \circ seq2""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.IDENTIFIER, "seq1"),
+        Token(TokenKind.CIRCLE, "\\circ"),
+        Token(TokenKind.IDENTIFIER, "seq2"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes the 'oplus' notation (1)") {
+    val inputSpec =
+      """bag1 (+) bag2""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.IDENTIFIER, "bag1"),
+        Token(TokenKind.OPLUS, "(+)"),
+        Token(TokenKind.IDENTIFIER, "bag2"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes the 'oplus' notation (2)") {
+    val inputSpec =
+      """bag1 \oplus bag2""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.IDENTIFIER, "bag1"),
+        Token(TokenKind.OPLUS, "\\oplus"),
+        Token(TokenKind.IDENTIFIER, "bag2"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes the 'ominus' notation (1)") {
+    val inputSpec =
+      """bag1 (-) bag2""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.IDENTIFIER, "bag1"),
+        Token(TokenKind.OMINUS, "(-)"),
+        Token(TokenKind.IDENTIFIER, "bag2"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes the 'ominus' notation (2)") {
+    val inputSpec =
+      """bag1 \ominus bag2""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.IDENTIFIER, "bag1"),
+        Token(TokenKind.OMINUS, "\\ominus"),
+        Token(TokenKind.IDENTIFIER, "bag2"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes the 'sqsubseteq' notation") {
+    val inputSpec =
+      """bag1 \sqsubseteq bag2""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.IDENTIFIER, "bag1"),
+        Token(TokenKind.SQSUBSETEQ, "\\sqsubseteq"),
+        Token(TokenKind.IDENTIFIER, "bag2"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
+  test("Recognizes the ':>' notation from the TLC module") {
+    val inputSpec =
+      """:>""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.COLON_LT, ":>"),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
   test("Recognizes strings") {
     val inputSpec =
       """ {"string1", "string2"} """.stripMargin

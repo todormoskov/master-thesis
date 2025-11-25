@@ -6,8 +6,92 @@ import scala.collection.mutable.ListBuffer
 
 sealed trait AST
 case class ExtendsStatement(extendedModules: List[Identifier]) extends AST
-case class ConstantDeclaration(constants: List[Identifier]) extends AST
+/**
+ * Variable declarations.
+ *
+ * VariableDeclaration := ['VARIABLE' | 'VARIABLES'] CommaList(Identifier)
+ */
 case class VariableDeclaration(variables: List[Identifier]) extends AST
+/**
+ * Constant declarations.
+ *
+ * ConstantDeclaration := ['CONSTANT' | 'CONSTANTS'] CommaList(OperatorDeclaration)
+ */
+case class ConstantDeclaration(constantToken: Token, constants: List[OperatorDeclaration]) extends AST
+/**
+ * The declaration of a single operator.
+ *
+ * OperatorDeclaration := Identifier
+ *                      | Identifier '(' CommaList('_') ')'
+ *                      | PrefixOp '_'
+ *                      | '_' InfixOp '_'
+ *                      | '_' PostfixOp
+ *
+ * Prefix, infix and postfix operator declarations are currently not supported!
+ */
+case class OperatorDeclaration(operator: Identifier | Token, arguments: List[Token]) extends AST
+/**
+ * OperatorDefinition :=  ( NonFixLHS
+ *                        | PrefixOp Identifier
+ *                        | Identifier InfixOp Identifier
+ *                        | Identifier PostfixOp )
+ *                        '=='
+ *                        Expression
+ *
+ * Prefix, infix and postfix operator definitions are currently not supported!
+ */
+case class OperatorDefinition(signature: NonFixLHS, body: Expression) extends AST
+/**
+ * Non-fix left-hand-side of an operator definition.
+ *
+ * NonFixLHS := Identifier ['(' CommaList(Identifier | OperatorDeclaration) ')']?
+ */
+case class NonFixLHS(identifier: Identifier, arguments: List[Identifier | OperatorDeclaration]) extends AST
+/**
+ * Single part of an instance prefix.
+ *
+ * InstancePrefixPart := Identifier [ '(' CommaList(Expression) ')' ]? '!'
+ *
+ * Examples: M!       -> InstancePrefixPart(Identifier("M"), Nil)
+ *           M(a, b)! -> InstancePrefixPart(Identifier("M"), List(Identifier("a"), Identifier("b"))
+ */
+case class InstancePrefixPart(identifier: Identifier, arguments: List[Expression]) extends AST
+/**
+ * The whole instance prefix is a list of instance prefix parts.
+ *
+ * InstancePrefix := InstancePrefixPart*
+ *
+ * Examples: A(arg1)! B! C(arg2)! -> List(InstancePrefixPart(Identifier("A"), List(Identifier("arg1"))),
+ *                                        InstancePrefixPart(Identifier("B"), List()),
+ *                                        InstancePrefixPart(Identifier("C"), List(Identifier("arg2")))
+ *                                   )
+ */
+type InstancePrefix = List[InstancePrefixPart]
+/**
+ * General identifier, which contains an optional prefix and a base identifier.
+ * General identifiers are also expressions themselves!
+ */
+case class GeneralIdentifier(prefix: InstancePrefix, identifier: Identifier) extends Expression
+/**
+ * Prefix operator (such as -, ~, \lnot, \neg, [], <>, DOMAIN, ENABLED, SUBSET, UNCHANGED, UNION)
+ * with an instance prefix.
+ * General prefix operators are not expressions on their own, only AST nodes!
+ *
+ * Examples: M!-, M!~, ...
+ */
+case class GeneralPrefixOp(prefix: InstancePrefix, prefixOp: String) extends AST
+/**
+ * Infix operator with an instance prefix.
+ * General infix operators are not expressions on their own, only AST nodes!
+ *
+ * Examples: M!++, ...
+ */
+case class GeneralInfixOp(prefix: InstancePrefix, infixOp: String) extends AST
+/**
+ * Postfix operator with an instance prefix.
+ * General postfix operators are not expressions on their own, only AST nodes!
+ */
+case class GeneralPostfixOp(prefix: InstancePrefix, postfixOp: String) extends AST
 
 /**
  * Expression trait.
@@ -46,9 +130,13 @@ case class UnaryExpression(operator: String, expression: Expression) extends Exp
  */
 case class BinaryExpression(operator: String, lhs: Expression, rhs: Expression) extends Expression
 /**
- * Operator application expressions. E.g. f(1, 2, 3).
+ * Identifier application expressions. E.g. f(1, 2, 3).
  */
-case class OperatorApplication(operatorName: String, operands: List[Expression]) extends Expression
+case class IdentifierApplication(identifier: Identifier, operands: List[Expression]) extends Expression
+/**
+ * Operator application expressions. E.g. M!f(1, 2, 3) or M(a, b)!(1, 2, 3)
+ */
+case class GeneralIdentifierApplication(identifier: GeneralIdentifier, operands: List[Expression]) extends Expression
 /**
  * Function application expressions. E.g. f[1, 2, 3].
  */
@@ -109,6 +197,29 @@ case class IndexSelector(indices: List[Expression]) extends SelectorPart
 case class SelectorPath(parts: List[SelectorPart]) extends AST
 case class ExceptClause(selector: SelectorPath, value: Expression) extends AST
 case class ExceptExpression(exceptTarget: Expression, clauses: List[ExceptClause]) extends Function
+
+/**
+ * Weak stuttering expression. E.g. [A]_e
+ */
+case class WeakStuttering(action: Expression, state: Expression) extends Expression
+/**
+ * Strong stuttering expression. E.g. <<A>>_e
+ */
+case class StrongStuttering(action: Expression, state: Expression) extends Expression
+/**
+ * Weak fairness expression. E.g. [A]_e
+ */
+case class WeakFairness(state: Expression, action: Expression) extends Expression
+/**
+ * Strong stuttering node. E.g. <<A>>_e
+ */
+case class StrongFairness(state: Expression, action: Expression) extends Expression
+
+/**
+ * At sign (@).
+ */
+case class AtSign() extends Expression
+
 
 case class Statement() extends AST
 case class Module(name: String, extendsStmt: ExtendsStatement, statements: List[Statement]) extends AST
@@ -209,32 +320,121 @@ class Parser(lexer: Tokenizer) {
     else Right(ExtendsStatement(Nil))
 
   /**
-   * Parse a constant declaration.
-   *
-   * [ ['CONSTANT' | 'CONSTANTS'] Identifier [',' Identifier]* ]?
-   *
-   * @return
-   */
-  def parseConstantDeclaration(): Either[String, ConstantDeclaration] =
-    if check(TokenKind.CONSTANT) || check(TokenKind.CONSTANTS) then for {
-        _ <- if check(TokenKind.CONSTANT) then consume(TokenKind.CONSTANT) else consume(TokenKind.CONSTANTS)
-        declaredConstants <- parseCommaListOfIdentifiers
-      } yield ConstantDeclaration(declaredConstants)
-    else Right(ConstantDeclaration(Nil))
-
-  /**
    * Parse a variable declaration.
    *
-   * [ ['VARIABLE' | 'VARIABLES'] Identifier [',' Identifier]* ]?
+   * [ ['VARIABLE' | 'VARIABLES'] CommaList(Identifier)
    *
    * @return
    */
   def parseVariableDeclaration(): Either[String, VariableDeclaration] =
     if check(TokenKind.VARIABLE) || check(TokenKind.VARIABLES) then for {
-        _ <- if check(TokenKind.VARIABLE) then consume(TokenKind.VARIABLE) else consume(TokenKind.VARIABLES)
-        declaredVariables <- parseCommaListOfIdentifiers
-      } yield VariableDeclaration(declaredVariables)
+      _ <- if check(TokenKind.VARIABLE) then consume(TokenKind.VARIABLE) else consume(TokenKind.VARIABLES)
+      declaredVariables <- parseCommaListOfIdentifiers
+    } yield VariableDeclaration(declaredVariables)
     else Right(VariableDeclaration(Nil))
+
+  /**
+   * Parse a constant declaration.
+   *
+   * [ ['CONSTANT' | 'CONSTANTS'] CommaList(OperatorDeclaration)
+   *
+   * @return
+   */
+  def parseConstantDeclaration(): Either[String, ConstantDeclaration] =
+    for {
+      token <- if check(TokenKind.CONSTANT) then consume(TokenKind.CONSTANT) else consume(TokenKind.CONSTANTS)
+      operatorDeclarations <- parseCommaListOfOperatorDeclarations
+    } yield ConstantDeclaration(token, operatorDeclarations)
+
+  /**
+   * Parse an operator declaration.
+   *
+   * OperatorDeclaration := Identifier
+   *                      | Identifier '(' CommaList('_') ')'
+   *                      | PrefixOp '_'
+   *                      | '_' InfixOp '_'
+   *                      | '_' PostfixOp
+   *
+   * Prefix, infix and postfix operators are currently not supported!
+   */
+  private def parseOperatorDeclaration(): Either[String, OperatorDeclaration] =
+    for {
+      identifier <- consume(TokenKind.IDENTIFIER)
+      args <- if check(TokenKind.LEFT_ROUND_BRACKET) then for {
+        _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
+        args <- parseCommaListOfUnderscoreTokens
+        _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
+      } yield args
+      else Right(Nil)
+    } yield OperatorDeclaration(Identifier(identifier.value), args)
+
+  /**
+   * Parse a comma-separated list of underscore tokens.
+   *
+   * @return A list of consumed underscored tokens.
+   */
+  private def parseCommaListOfUnderscoreTokens: Either[String, List[Token]] =
+    parseCommaList[Token](() => for token <- consume(TokenKind.UNDERSCORE) yield token)
+
+  /**
+   * Parse a comma-separated list of operator declarations.
+   *
+   * @return A list of parsed operator declarations.
+   */
+  private def parseCommaListOfOperatorDeclarations: Either[String, List[OperatorDeclaration]] =
+    parseCommaList[OperatorDeclaration](() => parseOperatorDeclaration())
+
+  /**
+   * Parse an operator definition.
+   *
+   * OperatorDefinition :=  ( NonFixLHS
+   *                        | PrefixOp Identifier
+   *                        | Identifier InfixOp Identifier
+   *                        | Identifier PostfixOp )
+   *                        '=='
+   *                        Expression
+   *
+   * Prefix, infix and postfix operator definitions are currently not supported!
+   */
+  def parseOperatorDefinition(): Either[String, OperatorDefinition] =
+    for {
+      nonFixLHS <- parseNonFixLHS()
+      _ <- consume(TokenKind.DEFINE)
+      body <- parseExpression()
+    } yield OperatorDefinition(nonFixLHS, body)
+
+  /**
+   * Parses non-fix LHS.
+   *
+   * NonFixLHS := Identifier ['(' CommaList(Identifier | OperatorDeclaration) ')']?
+   */
+  private def parseNonFixLHS(): Either[String, NonFixLHS] = for {
+    identifier <- parseIdentifier()
+    parameters <- if check(TokenKind.LEFT_ROUND_BRACKET) then for {
+      _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
+      parameters <- parseCommaListOfIdentifiersAndOperatorDeclarations
+      _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
+    } yield parameters
+    else Right(Nil)
+  } yield NonFixLHS(identifier, parameters)
+
+  /**
+   * Parses an identifier or an operator declaration.
+   */
+  private def parseIdentifierOrOperatorDeclaration(): Either[String, Identifier | OperatorDeclaration] =
+    for {
+      result <- if check(List(TokenKind.IDENTIFIER, TokenKind.LEFT_ROUND_BRACKET))
+        then parseOperatorDeclaration()
+        else parseIdentifier()
+    } yield result
+
+  /**
+   * Parse a comma-separated list of identifiers and operator declarations.
+   *
+   * @return A list of parsed identifiers and operator declarations.
+   */
+  private def parseCommaListOfIdentifiersAndOperatorDeclarations: Either[String, List[Identifier | OperatorDeclaration]] =
+    parseCommaList[Identifier | OperatorDeclaration](() => parseIdentifierOrOperatorDeclaration())
 
   /**
    * Parse an expression.
@@ -566,7 +766,7 @@ class Parser(lexer: Tokenizer) {
    * However, for now they are all implemented with the same precedence.
    * This might be changed in the future!
    *
-   * G.GeneralPostfixOp := InstancePrefix PrimeOperator
+   * G.GeneralPostfixOp := InstancePrefix PostfixOp
    *
    * Postfix := Expression GeneralPostfixOp
    *
@@ -623,22 +823,15 @@ class Parser(lexer: Tokenizer) {
     for _ <- consume(TokenKind.PRIME) yield PrimedExpression(expression)
 
   /**
-   * Parse a field access expression. The field access is a level 17 infix operator,
-   * so it binds stronger than all other operators. This is the reason for calling it
-   * directly before the parsing of function applications and primary expressions.
+   * Parse the right-hand side of a field access expression, expecting the left-hand side to be given as input.
+   *
+   * The field access is a level 17 infix operator, so it binds stronger than all other operators.
+   * This is the reason for calling it directly before the parsing of function applications and primary expressions.
    *
    * FieldAccess := Expression `.` Expression
    *
    * @return The field access as an AST-Node.
    */
-  /*
-  private def parseFieldAccessExpression(): Either[String, Expression] =
-    for {
-      expression <- parseFunctionApplication()
-      maybeFieldAccess <- parseFieldAccessRHS(expression)
-    } yield maybeFieldAccess
-  */
-
   private def parseFieldAccessRHS(maybeFieldAccessLHS: Expression): Either[String, Expression] = {
     if check(TokenKind.DOT) then for {
       _ <- consume(TokenKind.DOT)
@@ -649,31 +842,10 @@ class Parser(lexer: Tokenizer) {
   }
 
   /**
-   * Parse a function application.
-   *
-   * FunctionApplication := Expression [ '[' Expression [',' Expression]* ']' ]?
-   *
-   * @return The function application as an AST-Node.
-   */
-  /*
-  private def parseFunctionApplication(): Either[String, Expression] =
-    for {
-      expression <- parsePrimaryExpression()
-      maybeFunctionApplication <- parseFunctionApplicationArguments(expression)
-    } yield maybeFunctionApplication
-  private def parseFunctionApplication(expression: Expression): Either[String, Expression] =
-    for maybeFunctionApplication <- parseFunctionApplicationArguments(expression) yield maybeFunctionApplication
-  */
-
-  /**
-   * Parses the arguments of a function application.
-   * This function is recursive.
-   * If the opening bracket is not found, the function
-   * simply returns the given function expression.
-   * If the opening bracket is found, the function consumes it,
-   * consumes the comma separated list of expressions, and the
-   * closing bracket. Before returning it tries to parse further
-   * function applications to arguments. (E.g. as in f[0][0].)
+   * Parses the arguments of a function application. This function is a recursive function.
+   * If the opening bracket is not found, the function simply returns the given function expression.
+   * If the opening bracket is found, the function consumes it, consumes the comma separated list of expressions, and the closing bracket.
+   * Before returning, it tries to parse further function applications to arguments. (E.g. as in f[0][0].)
    *
    * FunctionApplicationArguments := [ '[' CommaList(Expression) ']' ]*
    *
@@ -693,15 +865,24 @@ class Parser(lexer: Tokenizer) {
   /**
    * Parses a primary expression.
    *
-   * PrimaryExpr := OperatorApplication | Identifier | Literal | Set | Function | Tuple
+   * PrimaryExpr := GeneralIdentifier
+   *              | GeneralIdentifierApplication
+   *              | Literal
+   *              | QuantifiedExpression
+   *              | ChooseExpression
+   *              | Set
+   *              | Function
+   *              | Tuple
+   *              | ParenthesizedExpression
+   *              | FairnessExpression
+   *              | IfThenElseExpression
+   *              | AtSign
    *
    * @return The primary expression as an AST-Node.
    */
   private def parsePrimaryExpression(): Either[String, Expression] =
-    if check(List(TokenKind.IDENTIFIER, TokenKind.LEFT_ROUND_BRACKET))
-      then for operatorApplication <- parseOperatorApplication() yield operatorApplication
-    else if check(TokenKind.IDENTIFIER)
-      then for identifier <- parseIdentifier() yield identifier
+    if check(TokenKind.IDENTIFIER)
+      then for generalIdentifier <- parseAndSimplifyGeneralIdentifier() yield generalIdentifier
     else if checkLiteral()
       then for literal <- parseLiteral() yield literal
     else if check(TokenKind.EXISTS) || check(TokenKind.FORALL)
@@ -711,39 +892,104 @@ class Parser(lexer: Tokenizer) {
     else if check(TokenKind.LEFT_CURLY_BRACKET)
       then for set <- parseSet() yield set
     else if check(TokenKind.LEFT_SQUARE_BRACKET)
-      then for function <- parseFunction() yield function
+      then for function <- parseFunctionOrWeakStuttering() yield function
     else if check(TokenKind.LEFT_ANGLE_BRACKET)
-      then for tuple <- parseTuple() yield tuple
+      then for tuple <- parseTupleOrStrongStuttering() yield tuple
     else if check(TokenKind.LEFT_ROUND_BRACKET)
       then for parenExpression <- parseParenthesizedExpression() yield parenExpression
+    else if check(List(TokenKind.WF, TokenKind.UNDERSCORE)) || check(List(TokenKind.SF, TokenKind.UNDERSCORE))
+      then for fairnessExpression <- parseFairnessExpression() yield fairnessExpression
     else if check(TokenKind.IF)
       then for ifThenElse <- parseIfThenElse() yield ifThenElse
+    else if check(TokenKind.AT)
+      then for _ <- consume(TokenKind.AT) yield AtSign()
     else Left("Syntax Error: Expression expected")
 
   /**
-   * Parse an operator application.
+   * Parse a general identifier and then "simplify" it.
    *
-   * OperatorApplication := Identifier ['(' Expression [',' Expression]* ')']?
-   *
-   * @return The operator application as an AST-Node.
+   * The simplification is the following:
+   * If the general identifier has an empty prefix, we return an Identifier.
+   * If the general identifier application has an empty prefix, we return an IdentifierApplication.
    */
-  private def parseOperatorApplication(): Either[String, OperatorApplication] =
+  private def parseAndSimplifyGeneralIdentifier(): Either[String, Expression] = {
+    for generalIdentifier <- parseGeneralIdentifier(Nil) yield generalIdentifier match {
+      case GeneralIdentifierApplication(GeneralIdentifier(Nil, identifier), args) => IdentifierApplication(identifier, args)
+      case GeneralIdentifier(Nil,identifier) => identifier
+      case _ => generalIdentifier
+    }
+  }
+
+  /**
+   * Parse a general identifier or a general identifier application.
+   *
+   * GeneralIdentifier := InstancePrefix Identifier
+   *
+   * GeneralIdentifierApplication := GeneralIdentifier '(' CommaList(Expression) ')'
+   *
+   */
+  private def parseGeneralIdentifier(parsedPrefixParts: List[InstancePrefixPart]): Either[String, Expression] = {
     for {
-      operatorName <- consume(TokenKind.IDENTIFIER)
-      operands <- if check(TokenKind.LEFT_ROUND_BRACKET) then for {
+      ast <- parseInstancePrefixPartOrIdentifierApplicationOrIdentifier()
+      result <- ast match {
+        // If we just parsed an instance prefix part, we try to parse the next syntactic object.
+        // This is a recursive step.
+        case part: InstancePrefixPart => parseGeneralIdentifier(parsedPrefixParts ++ List(part))
+        // If we just parsed as identifier application, we need to transform it into a general identifier application.
+        case IdentifierApplication(identifier, args) => Right(
+          GeneralIdentifierApplication(
+            GeneralIdentifier(
+              parsedPrefixParts,
+              identifier
+            ),
+            args)
+          )
+        // If we just parsed an identifier, we need to transform it into a general identifier.
+        case identifier: Identifier => Right(
+          GeneralIdentifier(parsedPrefixParts, identifier)
+        )
+      }
+    } yield result
+  }
+
+  /**
+   * Parse an instance prefix part, or an identifier application or an identifier.
+   *
+   * Examples for instance prefix parts: M! or M!(a, b)!
+   * Examples for identifier applications: foo(bar)
+   * Examples for identifiers: M, a, b, foo, bar
+   *
+   * InstancePrefixPart := Identifier [ '(' CommaList(Expression) ')' ]? '!'
+   *
+   * IdentifierApplication := Identifier '(' CommaList(Expression) ')'
+   *
+   */
+  private def parseInstancePrefixPartOrIdentifierApplicationOrIdentifier(): Either[String, AST] = {
+    for {
+      identifierToken <- consume(TokenKind.IDENTIFIER)
+      args <- if check(TokenKind.LEFT_ROUND_BRACKET) then for {
           _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
-          parsedOperators <- parseCommaListOfExpressions
+          args <- parseCommaListOfExpressions
           _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
-        } yield parsedOperators
+        } yield args
         else Right(Nil)
-    } yield OperatorApplication(operatorName.value, operands)
+      result <- check(TokenKind.BANG) match {
+        // If we see the ! symbol, we know that this is an InstancePrefixPart.
+        case true => for _ <- consume(TokenKind.BANG) yield InstancePrefixPart(Identifier(identifierToken.value), args)
+        // If we don't see the ! symbol and the arguments list is not empty, we know that this is an IdentifierApplication.
+        case false if args != Nil => Right(IdentifierApplication(Identifier(identifierToken.value), args))
+        // If we don't see the ! symbol and the arguments list is empty, we know that his is an Identifier.
+        case false => Right(Identifier(identifierToken.value))
+      }
+    } yield result
+  }
 
   /**
    * Parse an identifier.
    *
    * @return Identifier as AST-Node.
    */
-  def parseIdentifier(): Either[String, Identifier] = {
+  private def parseIdentifier(): Either[String, Identifier] = {
     for token <- consume(TokenKind.IDENTIFIER) yield Identifier(token.value)
   }
 
@@ -775,7 +1021,7 @@ class Parser(lexer: Tokenizer) {
    *
    * @return Literal as AST-Node.
    */
-  def parseLiteral(): Either[String, Literal] = {
+  private def parseLiteral(): Either[String, Literal] = {
     if check(TokenKind.TRUE)
     then for token <- consume(TokenKind.TRUE) yield Literal(token.value == "TRUE")
     else if check(TokenKind.FALSE)
@@ -1037,7 +1283,7 @@ class Parser(lexer: Tokenizer) {
    *
    * @return The function as an AST-Node.
    */
-  private def parseFunction(): Either[String, Function] =
+  private def parseFunctionOrWeakStuttering(): Either[String, Expression] =
     for {
       _ <- consume(TokenKind.LEFT_SQUARE_BRACKET)
       functionOrSetOfFunctions <- {
@@ -1057,6 +1303,8 @@ class Parser(lexer: Tokenizer) {
           // to create different AST nodes, depending on whether
           // we see the `->`, `EXCEPT`, `|->` or `:` symbol after
           // the first expression.
+          //
+          // Additionally, we parse here weak stuttering nodes, such as [A]_e.
           firstExpression <- parseExpression()
           result <- {
             // If we encounter `->`, we know that this is the set of
@@ -1071,6 +1319,11 @@ class Parser(lexer: Tokenizer) {
             else if check(TokenKind.EXCEPT) then for {
               exceptExpression <- parseExceptExpression(firstExpression)
             } yield exceptExpression
+            else if check(List(TokenKind.RIGHT_SQUARE_BRACKET, TokenKind.UNDERSCORE)) then for {
+              _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
+              _ <- consume(TokenKind.UNDERSCORE)
+              stateExpression <- parseExpression()
+            } yield WeakStuttering(firstExpression, stateExpression)
             // Here we have 2 more cases:
             // 1) The set of all records with specific keys and their domains
             //    (e.g. [foo: {"FOO"}, bar: {"BAR"}] )
@@ -1205,18 +1458,32 @@ class Parser(lexer: Tokenizer) {
     } yield IndexSelector(indices)
 
   /**
-   * Parse a TLA+ list (aka. a tuple).
+   * Parse a TLA+ list (aka. a tuple) or a strong stuttering node (e.g. <<A>>_e).
    *
    * Tuple := '<<' CommaList(Expression) '>>'
    *
+   * StrongStuttering := '<<' Expression '>>' '_' Expression
+   *
    * @return The tuple as an AST node with its elements.
    */
-  private def parseTuple(): Either[String, Tuple] =
+  private def parseTupleOrStrongStuttering(): Either[String, Expression] =
     for {
       _ <- consume(TokenKind.LEFT_ANGLE_BRACKET)
-      expressions <- parseCommaListOfExpressions
-      _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
-    } yield Tuple(expressions)
+      firstExpression <- parseExpression()
+      result <- if check(List(TokenKind.RIGHT_ANGLE_BRACKET, TokenKind.UNDERSCORE)) then for {
+          _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
+          _ <- consume(TokenKind.UNDERSCORE)
+          stateExpression <- parseExpression()
+        } yield StrongStuttering(firstExpression, stateExpression)
+        else if check(TokenKind.RIGHT_ANGLE_BRACKET) then for {
+          _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
+        } yield Tuple(List(firstExpression))
+        else for {
+          _ <- consume(TokenKind.COMMA)
+          tailExpressions <- parseCommaListOfExpressions
+          _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
+        } yield Tuple(List(firstExpression) ++ tailExpressions)
+    } yield result
 
   /**
    * Parse a parenthesized expression.
@@ -1231,6 +1498,23 @@ class Parser(lexer: Tokenizer) {
       expression <- parseExpression()
       _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
     } yield ParenthesizedExpression(expression)
+
+  /**
+   * Parse a weak or strong fairness expression.
+   *
+   * FairnessExpression := ('WF_' | 'SF_') Expression '(' Expression ')'
+   *
+   * @return
+   */
+  private def parseFairnessExpression(): Either[String, Expression] =
+    for {
+      token <- if check(TokenKind.WF) then consume(TokenKind.WF) else consume(TokenKind.SF)
+      _ <- consume(TokenKind.UNDERSCORE)
+      state <- parseIdentifierOrTuple()
+      _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
+      action <- parseExpression()
+      _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
+    } yield if token.value == "WF" then WeakFairness(state, action) else StrongFairness(state, action)
 
   /**
    * Parse an IF-THEN-ELSE expression.
