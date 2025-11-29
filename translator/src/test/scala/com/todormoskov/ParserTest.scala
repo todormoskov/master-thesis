@@ -1700,24 +1700,199 @@ class ParserTest extends AnyFunSuite {
     ))
   }
 
-
-  /*
-  private def parse(input: String): Either[String, Module] = {
-    val tokenizer = Tokenizer(Scanner(input))
-    val parser = new Parser(tokenizer)
-    parser.parseModule()
-  }
-
-  // Module-level constructs
   test("Parses the beginning and the end of a module") {
     val inputSpec =
       """---- MODULE M ----
-        |----
-        |====
-        |""".stripMargin
+        | EXTENDS M1, M2
+        | foo == 1
+        | bar(arg1) == arg1 + arg1
+        | ====""".stripMargin
 
-    val module = parse(inputSpec).toOption.get
-    assert(module == Module("M", ExtendsStatement(Nil), Nil))
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModule().toOption.get
+    assert(ast == Module(
+      Identifier("M"),
+      ExtendsStatement(List(Identifier("M1"), Identifier("M2"))),
+      List(
+        OperatorDefinition(
+          NonFixLHS(
+            Identifier("foo"),
+            Nil
+          ),
+          Literal(1)
+        ),
+        OperatorDefinition(
+          NonFixLHS(
+            Identifier("bar"),
+            List(
+              Identifier("arg1")
+            )
+          ),
+          BinaryExpression(
+            "+",
+            Identifier("arg1"),
+            Identifier("arg1")
+          )
+        ),
+      )))
   }
-  */
+
+  test("Parses nested modules") {
+    val inputSpec =
+      """---- MODULE Outer ----
+        |VARIABLE x
+        |---- MODULE Inner ----
+        |VARIABLE y
+        |
+        |S == {0, 1}
+        |Init == x \in S /\ y \in S
+        |Next == x' \in S /\ y' \in S /\ x' # y'
+        |Spec == Init /\ [][Next]_<<x, y>> /\ WF_<<x, y>>(Next)
+        |
+        |THEOREM Spec => <>(x # y) \* TODO: THEOREM P == Spec => <>(x # y) should also work!
+        |====
+        |INSTANCE Inner WITH y <- x \* TODO: I == INSTANCE Inner WITH y <- x should also work!
+        | ====""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModule().toOption.get
+    assert(ast == Module(
+      Identifier("Outer"),
+      ExtendsStatement(Nil),
+      List(
+        VariableDeclaration(List(Identifier("x"))),
+        Module(
+          Identifier("Inner"),
+          ExtendsStatement(Nil),
+          List(
+            VariableDeclaration(List(Identifier("y"))),
+            OperatorDefinition(
+              NonFixLHS(
+                Identifier("S"),
+                Nil
+              ),
+              ExplicitSet(
+                List(
+                  Literal(0),
+                  Literal(1)
+                )
+              )
+            ),
+            OperatorDefinition(
+              NonFixLHS(
+                Identifier("Init"),
+                Nil
+              ),
+              BinaryExpression(
+                "/\\",
+                BinaryExpression(
+                  "\\in",
+                  Identifier("x"),
+                  Identifier("S")
+                ),
+                BinaryExpression(
+                  "\\in",
+                  Identifier("y"),
+                  Identifier("S")
+                ),
+              )
+            ),
+            OperatorDefinition(
+              NonFixLHS(
+                Identifier("Next"),
+                Nil
+              ),
+              BinaryExpression(
+                "/\\",
+                BinaryExpression(
+                  "/\\",
+                  BinaryExpression(
+                    "\\in",
+                    PrimedExpression(
+                      Identifier("x")
+                    ),
+                    Identifier("S")
+                  ),
+                  BinaryExpression(
+                    "\\in",
+                    PrimedExpression(
+                      Identifier("y")
+                    ),
+                    Identifier("S")
+                  ),
+                ),
+                BinaryExpression(
+                  "#",
+                  PrimedExpression(
+                    Identifier("x")
+                  ),
+                  PrimedExpression(
+                    Identifier("y")
+                  ),
+                ),
+              )
+            ),
+            OperatorDefinition(
+              NonFixLHS(
+                Identifier("Spec"),
+                Nil
+              ),
+              BinaryExpression(
+                "/\\",
+                BinaryExpression(
+                  "/\\",
+                  Identifier("Init"),
+                  UnaryExpression(
+                    "[]",
+                    WeakStuttering(
+                      Identifier("Next"),
+                      Tuple(
+                        List(
+                          Identifier("x"),
+                          Identifier("y")
+                        )
+                      )
+                    )
+                  ),
+                ),
+                WeakFairness(
+                  IdentifierTuple(
+                    List(
+                      Identifier("x"),
+                      Identifier("y")
+                    )
+                  ),
+                  Identifier("Next")
+                )
+              )
+            ),
+            Theorem(
+              BinaryExpression(
+                "=>",
+                Identifier("Spec"),
+                UnaryExpression(
+                  "<>",
+                  ParenthesizedExpression(
+                    BinaryExpression(
+                      "#",
+                      Identifier("x"),
+                      Identifier("y")
+                    )
+                  )
+                )
+              )
+            )
+          )
+        ),
+        Instance(
+          Identifier("Inner"),
+          List(
+            Substitution(
+              Identifier("y"),
+              Identifier("x")
+            )
+          )
+        )
+      )))
+  }
+
+
 }

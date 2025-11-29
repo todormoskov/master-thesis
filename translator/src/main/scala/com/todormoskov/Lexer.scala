@@ -248,7 +248,10 @@ object Lexer {
             // Line feed and carriage return handling
             isNewLine = true
             scanner.consume()
-            return Token(TokenKind.NEWLINE, null)
+            // Change on 28.11.2025: We start ignoring newlines,
+            // and simply look for the next token (as with the other whitespace symbols)!
+            // return Token(TokenKind.NEWLINE, null)
+            return consume(keepBuffer = true)
           }
           // Consume whitespace
           scanner.consume()

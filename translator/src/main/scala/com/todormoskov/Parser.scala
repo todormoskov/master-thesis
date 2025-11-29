@@ -5,7 +5,6 @@ import com.todormoskov.Lexer.*
 import scala.collection.mutable.ListBuffer
 
 sealed trait AST
-case class ExtendsStatement(extendedModules: List[Identifier]) extends AST
 /**
  * ModuleUnit trait for the TLA+ declarations and definitions.
  *
@@ -21,6 +20,22 @@ case class ExtendsStatement(extendedModules: List[Identifier]) extends AST
  *            | MinusSeparator ( = AtLeast4("-"))
  */
 sealed trait ModuleUnit extends AST
+/**
+ * An AST representation of a TLA+ module.
+ *
+ * Module :=      MinusSeparator 'MODULE' Identifier MinusSeparator
+ *                ['EXTENDS' CommaList(Identifier)]?
+ *                ModuleUnit*
+ *                EqualSeparator
+ */
+case class Module(identifier: Identifier, extendsStmt: ExtendsStatement, moduleUnits: List[ModuleUnit]) extends ModuleUnit
+/**
+ * A module extends statement. Contains the list with extended modules.
+ *
+ * ExtendsStatement := ['EXTENDS' CommaList(Identifier)]?
+ *
+ */
+case class ExtendsStatement(extendedModules: List[Identifier]) extends AST
 /**
  * Variable declarations.
  *
@@ -140,6 +155,10 @@ case class Assumption(token: Token, expression: Expression) extends ModuleUnit
  * Theorem ::= 'THEOREM' Expression
  */
 case class Theorem(expression: Expression) extends ModuleUnit
+/**
+ * Minus (= AtLest4('-')) or equal separator(= AtLest4('=')).
+ */
+case class Separator(token: Token) extends ModuleUnit
 
 /**
  * Expression trait.
@@ -262,15 +281,10 @@ case class WeakFairness(state: Expression, action: Expression) extends Expressio
  * Strong stuttering node. E.g. <<A>>_e
  */
 case class StrongFairness(state: Expression, action: Expression) extends Expression
-
 /**
  * At sign (@).
  */
 case class AtSign() extends Expression
-
-
-case class Statement() extends AST
-case class Module(name: String, extendsStmt: ExtendsStatement, statements: List[Statement]) extends AST
 
 class Parser(lexer: Tokenizer) {
 
@@ -354,18 +368,62 @@ class Parser(lexer: Tokenizer) {
     } yield result
 
   /**
+   * Parse a TLA+ module.
+   *
+   * Module := MinusSeparator 'MODULE' Identifier MinusSeparator
+   *           ['EXTENDS' CommaList(Identifier)]?
+   *           ModuleUnit*
+   *           EqualSeparator
+   * @return
+   */
+  def parseModule(): Either[String, Module] = {
+    for {
+      _ <- consume(TokenKind.MINUS_SEPARATOR)
+      _ <- consume(TokenKind.MODULE)
+      moduleName <- parseIdentifier()
+      _ <- consume(TokenKind.MINUS_SEPARATOR)
+      extendsStmt <- parseExtendsStatement()
+      moduleUnits <- parseModuleUnits()
+      _ <- consume(TokenKind.EQUAL_SEPARATOR)
+    } yield Module(moduleName, extendsStmt, moduleUnits)
+  }
+
+  /**
    * Parse an EXTENDS statement.
    *
-   * ExtendsStmt := ['EXTENDS' Identifier [',' Identifier]* ]?
+   * ExtendsStmt := ['EXTENDS' CommaList(Identifier) ]?
    *
-   * @return
    */
   def parseExtendsStatement(): Either[String, ExtendsStatement] =
     if check(TokenKind.EXTENDS) then for {
         _ <- consume(TokenKind.EXTENDS)
-        extendedModules <- parseCommaListOfIdentifiers
+        extendedModules <- parseCommaListOfIdentifiers()
       } yield ExtendsStatement(extendedModules)
     else Right(ExtendsStatement(Nil))
+
+  /**
+   * Set with the possible first tokens of a module unit.
+   */
+  private val moduleUnitFirstSet = Set(
+    TokenKind.VARIABLE,
+    TokenKind.VARIABLES,
+    TokenKind.CONSTANT,
+    TokenKind.CONSTANTS,
+    TokenKind.LOCAL,
+    TokenKind.IDENTIFIER,
+    TokenKind.INSTANCE,
+    TokenKind.ASSUME,
+    TokenKind.THEOREM,
+    TokenKind.MINUS_SEPARATOR)
+
+  /**
+   * Check if the next token is one of the possible first tokens of a module unit.
+   */
+  private def checkModuleUnitFirstSet(): Boolean =
+    lexer.peek() match {
+      case Token(kind, value) if moduleUnitFirstSet contains kind => true
+      case _ => false
+    }
 
   /**
    * Parse a single module unit.
@@ -381,7 +439,7 @@ class Parser(lexer: Tokenizer) {
    *        | Module
    *        | MinusSeparator ( = AtLeast4("-"))
    */
-  def parseModuleUnit(): Either[String, ModuleUnit] = {
+  def parseModuleUnit(): Either[String, ModuleUnit] =
     lexer.peek() match {
       case Token(TokenKind.VARIABLE, _) => parseVariableDeclaration()
       case Token(TokenKind.VARIABLES, _) => parseVariableDeclaration()
@@ -392,9 +450,35 @@ class Parser(lexer: Tokenizer) {
       case Token(TokenKind.INSTANCE, _) => parseInstance()
       case Token(TokenKind.ASSUME, _) => parseAssumption()
       case Token(TokenKind.THEOREM, _) => parseTheorem()
-      case Token(TokenKind.MINUS_SEPARATOR, _) => ???
+      case Token(TokenKind.MINUS_SEPARATOR, _) => parseNestedModuleOrSeparator()
       case _ => Left("Syntax Error: Module unit expected")
     }
+
+  /**
+   * Parses a nested module or a separator.
+   *
+   * NestedModuleOrSeparator := Module | Separator
+   *
+   */
+  private def parseNestedModuleOrSeparator(): Either[String, ModuleUnit] =
+    if check(List(TokenKind.MINUS_SEPARATOR, TokenKind.MODULE))
+      then parseModule()
+      else parseSeparator()
+
+  /**
+   * Parse a sequence of module units.
+   *
+   * @return A list of consumed module units.
+   */
+  private def parseModuleUnits(): Either[String, List[ModuleUnit]] = {
+    val units = new ListBuffer[ModuleUnit]
+    while (checkModuleUnitFirstSet()) {
+      (for moduleUnit <- parseModuleUnit() yield moduleUnit) match {
+        case Right(value) => units addOne value
+        case Left(value) => return Left(value)
+      }
+    }
+    Right(units.toList)
   }
 
   /**
@@ -430,7 +514,7 @@ class Parser(lexer: Tokenizer) {
   private def parseVariableDeclaration(): Either[String, VariableDeclaration] =
     if check(TokenKind.VARIABLE) || check(TokenKind.VARIABLES) then for {
       _ <- if check(TokenKind.VARIABLE) then consume(TokenKind.VARIABLE) else consume(TokenKind.VARIABLES)
-      declaredVariables <- parseCommaListOfIdentifiers
+      declaredVariables <- parseCommaListOfIdentifiers()
     } yield VariableDeclaration(declaredVariables)
     else Right(VariableDeclaration(Nil))
 
@@ -444,7 +528,7 @@ class Parser(lexer: Tokenizer) {
   private def parseConstantDeclaration(): Either[String, ConstantDeclaration] =
     for {
       token <- if check(TokenKind.CONSTANT) then consume(TokenKind.CONSTANT) else consume(TokenKind.CONSTANTS)
-      operatorDeclarations <- parseCommaListOfOperatorDeclarations
+      operatorDeclarations <- parseCommaListOfOperatorDeclarations()
     } yield ConstantDeclaration(token, operatorDeclarations)
 
   /**
@@ -463,7 +547,7 @@ class Parser(lexer: Tokenizer) {
       identifier <- consume(TokenKind.IDENTIFIER)
       args <- if check(TokenKind.LEFT_ROUND_BRACKET) then for {
         _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
-        args <- parseCommaListOfUnderscoreTokens
+        args <- parseCommaListOfUnderscoreTokens()
         _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
       } yield args
       else Right(Nil)
@@ -474,7 +558,7 @@ class Parser(lexer: Tokenizer) {
    *
    * @return A list of consumed underscored tokens.
    */
-  private def parseCommaListOfUnderscoreTokens: Either[String, List[Token]] =
+  private def parseCommaListOfUnderscoreTokens(): Either[String, List[Token]] =
     parseCommaList[Token](() => for token <- consume(TokenKind.UNDERSCORE) yield token)
 
   /**
@@ -482,7 +566,7 @@ class Parser(lexer: Tokenizer) {
    *
    * @return A list of parsed operator declarations.
    */
-  private def parseCommaListOfOperatorDeclarations: Either[String, List[OperatorDeclaration]] =
+  private def parseCommaListOfOperatorDeclarations(): Either[String, List[OperatorDeclaration]] =
     parseCommaList[OperatorDeclaration](() => parseOperatorDeclaration())
 
   /**
@@ -491,7 +575,7 @@ class Parser(lexer: Tokenizer) {
    * that they both can start with a NonFixLHS. In that
    * case we have to parse the '==' and look at the
    * following symbol: If it is 'INSTANCE', then we have
-   * a module definition, otherwise an oprator definition.
+   * a module definition, otherwise an operator definition.
    *
    * OperatorDefinition :=  ( NonFixLHS
    *                        | PrefixOp Identifier
@@ -526,7 +610,7 @@ class Parser(lexer: Tokenizer) {
     identifier <- parseIdentifier()
     parameters <- if check(TokenKind.LEFT_ROUND_BRACKET) then for {
       _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
-      parameters <- parseCommaListOfIdentifiersAndOperatorDeclarations
+      parameters <- parseCommaListOfIdentifiersAndOperatorDeclarations()
       _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
     } yield parameters
     else Right(Nil)
@@ -547,7 +631,7 @@ class Parser(lexer: Tokenizer) {
    *
    * @return A list of parsed identifiers and operator declarations.
    */
-  private def parseCommaListOfIdentifiersAndOperatorDeclarations: Either[String, List[Identifier | OperatorDeclaration]] =
+  private def parseCommaListOfIdentifiersAndOperatorDeclarations(): Either[String, List[Identifier | OperatorDeclaration]] =
     parseCommaList[Identifier | OperatorDeclaration](() => parseIdentifierOrOperatorDeclaration())
 
   /**
@@ -639,6 +723,11 @@ class Parser(lexer: Tokenizer) {
       expression <- parseExpression()
     } yield Theorem(expression)
 
+  private def parseSeparator(): Either[String, Separator] =
+    for {
+      token <- if check(TokenKind.MINUS_SEPARATOR) then consume(TokenKind.MINUS_SEPARATOR) else consume(TokenKind.EQUAL_SEPARATOR)
+    } yield Separator(token)
+
   /**
    * Parse an expression.
    * @return
@@ -651,7 +740,7 @@ class Parser(lexer: Tokenizer) {
    *
    * @return A list of parsed expressions.
    */
-  private def parseCommaListOfExpressions: Either[String, List[Expression]] =
+  private def parseCommaListOfExpressions(): Either[String, List[Expression]] =
     parseCommaList[Expression](() => parseExpression())
 
   /**
@@ -1058,7 +1147,7 @@ class Parser(lexer: Tokenizer) {
   private def parseFunctionApplicationArguments(appliedFunction: Expression): Either[String, Expression] = {
     if check(TokenKind.LEFT_SQUARE_BRACKET) then for {
       _ <- consume(TokenKind.LEFT_SQUARE_BRACKET)
-      operands <- parseCommaListOfExpressions
+      operands <- parseCommaListOfExpressions()
       _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
       functionApplication <- parseFunctionApplicationArguments(FunctionApplication(appliedFunction, operands))
     } yield functionApplication
@@ -1172,7 +1261,7 @@ class Parser(lexer: Tokenizer) {
       identifierToken <- consume(TokenKind.IDENTIFIER)
       args <- if check(TokenKind.LEFT_ROUND_BRACKET) then for {
           _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
-          args <- parseCommaListOfExpressions
+          args <- parseCommaListOfExpressions()
           _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
         } yield args
         else Right(Nil)
@@ -1201,7 +1290,7 @@ class Parser(lexer: Tokenizer) {
    *
    * @return A list of parsed identifier tokens.
    */
-  private def parseCommaListOfIdentifiers: Either[String, List[Identifier]] =
+  private def parseCommaListOfIdentifiers(): Either[String, List[Identifier]] =
     parseCommaList[Identifier](() => parseIdentifier())
 
   /**
@@ -1257,7 +1346,7 @@ class Parser(lexer: Tokenizer) {
           body <- parseExpression()
         } yield BoundedQuantifiedExpression(token.value, binders, body)
         else for {
-          binders <- parseCommaListOfIdentifiers
+          binders <- parseCommaListOfIdentifiers()
           _ <- consume(TokenKind.COLON)
           body <- parseExpression()
         } yield QuantifiedExpression(token.value, binders, body)
@@ -1358,7 +1447,7 @@ class Parser(lexer: Tokenizer) {
               // simply parse them
               else if check(TokenKind.COMMA) then for {
                 _ <- consume(TokenKind.COMMA)
-                followingExpressions <- parseCommaListOfExpressions
+                followingExpressions <- parseCommaListOfExpressions()
                 _ <- consume(TokenKind.RIGHT_CURLY_BRACKET)
               } yield ExplicitSet(List(firstExpr) ++ followingExpressions)
               // If we were not able to find a colon or a comma,
@@ -1384,7 +1473,7 @@ class Parser(lexer: Tokenizer) {
   private def parseIdentifierTuple(): Either[String, IdentifierTuple] =
     for {
       _ <- consume(TokenKind.LEFT_ANGLE_BRACKET)
-      identifiers <- parseCommaListOfIdentifiers
+      identifiers <- parseCommaListOfIdentifiers()
       _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
     } yield IdentifierTuple(identifiers)
 
@@ -1436,7 +1525,7 @@ class Parser(lexer: Tokenizer) {
   private def parseQuantifierBound(): Either[String, QuantifierBound] =
     for {
       identifierOrTuple <- if check(List(TokenKind.IDENTIFIER, TokenKind.COMMA))
-        then parseCommaListOfIdentifiers
+        then parseCommaListOfIdentifiers()
         else parseIdentifierOrTuple()
       _ <- consume(TokenKind.SET_IN)
       expression <- parseExpression()
@@ -1525,7 +1614,7 @@ class Parser(lexer: Tokenizer) {
             else if check(List(TokenKind.RIGHT_SQUARE_BRACKET, TokenKind.UNDERSCORE)) then for {
               _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
               _ <- consume(TokenKind.UNDERSCORE)
-              stateExpression <- parseExpression()
+              stateExpression <- parsePrimaryExpression()
             } yield WeakStuttering(firstExpression, stateExpression)
             // Here we have 2 more cases:
             // 1) The set of all records with specific keys and their domains
@@ -1656,7 +1745,7 @@ class Parser(lexer: Tokenizer) {
   private def parseIndexSelector(): Either[String, IndexSelector] =
     for {
       _ <- consume(TokenKind.LEFT_SQUARE_BRACKET)
-      indices <- parseCommaListOfExpressions
+      indices <- parseCommaListOfExpressions()
       _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
     } yield IndexSelector(indices)
 
@@ -1683,7 +1772,7 @@ class Parser(lexer: Tokenizer) {
         } yield Tuple(List(firstExpression))
         else for {
           _ <- consume(TokenKind.COMMA)
-          tailExpressions <- parseCommaListOfExpressions
+          tailExpressions <- parseCommaListOfExpressions()
           _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
         } yield Tuple(List(firstExpression) ++ tailExpressions)
     } yield result
@@ -1735,26 +1824,4 @@ class Parser(lexer: Tokenizer) {
       _ <- consume(TokenKind.ELSE)
       elseExpr <- parseExpression()
     } yield IfThenElse(cond, thenExpr, elseExpr)
-
-  /**
-   * Parse a TLA+ module.
-   *
-   * Module :=      MinusSeparator 'MODULE' Identifier MinusSeparator
-   *                ['EXTENDS' Identifier [',' Identifier]* ]?
-   *                Statement*
-   *                EqualSeparator
-   * @return
-   */
-  /*
-  def parseModule(): Either[String, Module] = {
-    for {
-      _ <- consume(TokenKind.MINUS_SEPARATOR)
-      _ <- consume(TokenKind.MODULE)
-      moduleName <- consume(TokenKind.IDENTIFIER)
-      _ <- consume(TokenKind.MINUS_SEPARATOR)
-      extendsStmt <- parseExtendsStatement()
-      _ <- consume(TokenKind.EQUAL_SEPARATOR)
-    } yield Module(moduleName.value, extendsStmt, null)
-  }
-  */
 }

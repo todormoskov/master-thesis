@@ -32,11 +32,8 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.MODULE, "MODULE"),
         Token(TokenKind.IDENTIFIER, "M"),
         Token(TokenKind.MINUS_SEPARATOR, "----"),
-        Token(TokenKind.NEWLINE, null),
         Token(TokenKind.MINUS_SEPARATOR, "----"),
-        Token(TokenKind.NEWLINE, null),
         Token(TokenKind.EQUAL_SEPARATOR, "===="),
-        Token(TokenKind.NEWLINE, null),
         Token(TokenKind.EOF, null)
       )
     )
@@ -655,7 +652,6 @@ class LexerTest extends AnyFunSuite {
       List(
         Token(TokenKind.AND, "/\\"),
         Token(TokenKind.IDENTIFIER, "p1"),
-        Token(TokenKind.NEWLINE, null),
         Token(TokenKind.AND, "/\\"),
         Token(TokenKind.IDENTIFIER, "p2"),
         Token(TokenKind.EOF, null)
@@ -983,7 +979,6 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.NEWLINE, null),
         Token(TokenKind.INTEGER, "1"),
         Token(TokenKind.EOF, null)
       )
@@ -1011,7 +1006,6 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.NEWLINE, null),
         Token(TokenKind.INTEGER, "1"),
         Token(TokenKind.EOF, null)
       )
@@ -1262,7 +1256,6 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
         Token(TokenKind.SQUARE, "[]"),
         Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
-        Token(TokenKind.NEWLINE, null),
         Token(TokenKind.LEFT_ROUND_BRACKET, "("),
         Token(TokenKind.EPC_VAR, "var"),
         Token(TokenKind.IDENTIFIER, "x"),
@@ -1274,7 +1267,6 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.GT, ">"),
         Token(TokenKind.DOT, "."),
         Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.NEWLINE, null),
         Token(TokenKind.EPC_THREAD_COMPOSITION, "|"),
         Token(TokenKind.EPC_VAR, "var"),
         Token(TokenKind.IDENTIFIER, "y"),
@@ -1286,7 +1278,6 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.GT, ">"),
         Token(TokenKind.DOT, "."),
         Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.NEWLINE, null),
         Token(TokenKind.EPC_THREAD_COMPOSITION, "|"),
         Token(TokenKind.EPC_VAR, "var"),
         Token(TokenKind.IDENTIFIER, "z"),
@@ -1299,7 +1290,6 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.DOT, "."),
         Token(TokenKind.INTEGER, "0"),
         Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.NEWLINE, null),
         Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
         Token(TokenKind.EOF, null)
       )
