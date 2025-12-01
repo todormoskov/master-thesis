@@ -1028,6 +1028,34 @@ class LexerTest extends AnyFunSuite {
     )
   }
 
+  test("Recognizes the opening of an EPC spec within multi-line comments") {
+    val inputSpec =
+      """(* --EPC
+        | (p = 1) [[ [] <| var x. 0 ]] *)""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.EPC_CONTEXT_OPEN, "--EPC"),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
+        Token(TokenKind.IDENTIFIER, "p"),
+        Token(TokenKind.EQ, "="),
+        Token(TokenKind.INTEGER, "1"),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
+        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
+        Token(TokenKind.SQUARE, "[]"),
+        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
+        Token(TokenKind.EPC_VAR, "var"),
+        Token(TokenKind.IDENTIFIER, "x"),
+        Token(TokenKind.DOT, "."),
+        Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
+        Token(TokenKind.EPC_CONTEXT_CLOSE, ""),
+        Token(TokenKind.EOF, null)
+      )
+    )
+  }
+
   test("Recognizes EPC 'var' declarations") {
     val inputSpec =
       """var x.0""".stripMargin
@@ -1046,16 +1074,16 @@ class LexerTest extends AnyFunSuite {
 
   test("Recognizes EPC 'assign' actions") {
     val inputSpec =
-      """<x := 10>.0""".stripMargin
+      """<< x := 10 >>.0""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LT, "<"),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.EPC_ASSIGN, ":="),
         Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.GT, ">"),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
         Token(TokenKind.DOT, "."),
         Token(TokenKind.INTEGER, "0"),
         Token(TokenKind.EOF, null)
@@ -1065,7 +1093,7 @@ class LexerTest extends AnyFunSuite {
 
   test("Recognizes single EPC location with an integer id") {
     val inputSpec =
-      """(p = 1) [[ [x |-> Undefined] <| var x. <x := 10>. 0 ]]""".stripMargin
+      """(p = 1) [[ [x |-> Undefined] <| var x. <<x := 10>>. 0 ]]""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
@@ -1079,17 +1107,17 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.MAPS_TO, "|->"),
-        Token(TokenKind.EPC_UNDEFINED, "Undefined"),
+        Token(TokenKind.IDENTIFIER, "Undefined"),
         Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
         Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
         Token(TokenKind.EPC_VAR, "var"),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.DOT, "."),
-        Token(TokenKind.LT, "<"),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.EPC_ASSIGN, ":="),
         Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.GT, ">"),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
         Token(TokenKind.DOT, "."),
         Token(TokenKind.INTEGER, "0"),
         Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
@@ -1100,7 +1128,7 @@ class LexerTest extends AnyFunSuite {
 
   test("Recognizes single EPC location with a string id") {
     val inputSpec =
-      """(q = "a") [[ [x |-> Undefined] <| var x. <x := 10>. 0 ]]""".stripMargin
+      """(q = "a") [[ [x |-> Undefined] <| var x. <<x := 10>>. 0 ]]""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
@@ -1114,17 +1142,17 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.MAPS_TO, "|->"),
-        Token(TokenKind.EPC_UNDEFINED, "Undefined"),
+        Token(TokenKind.IDENTIFIER, "Undefined"),
         Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
         Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
         Token(TokenKind.EPC_VAR, "var"),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.DOT, "."),
-        Token(TokenKind.LT, "<"),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.EPC_ASSIGN, ":="),
         Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.GT, ">"),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
         Token(TokenKind.DOT, "."),
         Token(TokenKind.INTEGER, "0"),
         Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
@@ -1135,7 +1163,7 @@ class LexerTest extends AnyFunSuite {
 
   test("Recognizes multiple EPC locations with integer ids") {
     val inputSpec =
-      """|| (p \in 1..10) [[ [x |-> Undefined] <| var x. <x := 10>. 0 ]]"""
+      """|| (p \in 1..10) [[ [x |-> Undefined] <| var x. <<x := 10>>. 0 ]]"""
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
@@ -1152,17 +1180,17 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.MAPS_TO, "|->"),
-        Token(TokenKind.EPC_UNDEFINED, "Undefined"),
+        Token(TokenKind.IDENTIFIER, "Undefined"),
         Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
         Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
         Token(TokenKind.EPC_VAR, "var"),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.DOT, "."),
-        Token(TokenKind.LT, "<"),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.EPC_ASSIGN, ":="),
         Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.GT, ">"),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
         Token(TokenKind.DOT, "."),
         Token(TokenKind.INTEGER, "0"),
         Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
@@ -1173,7 +1201,7 @@ class LexerTest extends AnyFunSuite {
 
   test("Recognizes multiple EPC locations with string ids") {
     val inputSpec =
-      """|| (q \in {"a", "b"}) [[ [x |-> Undefined] <| var x. <x := 10>. 0 ]]"""
+      """|| (q \in {"a", "b"}) [[ [x |-> Undefined] <| var x. <<x := 10>>. 0 ]]"""
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
@@ -1192,17 +1220,17 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.MAPS_TO, "|->"),
-        Token(TokenKind.EPC_UNDEFINED, "Undefined"),
+        Token(TokenKind.IDENTIFIER, "Undefined"),
         Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
         Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
         Token(TokenKind.EPC_VAR, "var"),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.DOT, "."),
-        Token(TokenKind.LT, "<"),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.EPC_ASSIGN, ":="),
         Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.GT, ">"),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
         Token(TokenKind.DOT, "."),
         Token(TokenKind.INTEGER, "0"),
         Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
@@ -1227,7 +1255,7 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.MAPS_TO, "|->"),
-        Token(TokenKind.EPC_INITIALIZED, "Initialized"),
+        Token(TokenKind.IDENTIFIER, "Initialized"),
         Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
         Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
         Token(TokenKind.INTEGER, "0"),
@@ -1240,9 +1268,9 @@ class LexerTest extends AnyFunSuite {
   test("Recognizes thread compositions") {
     val inputSpec =
       """(p = 1) [[ [] <|
-        |           ( var x. <x := 10>. 0
-        |           | var y. <y := 10>. 0
-        |           | var z. <z := 10>. 0)
+        |           ( var x. <<x := 10>>. 0
+        |           | var y. <<y := 10>>. 0
+        |           | var z. <<z := 10>>. 0)
         |]]""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
@@ -1260,33 +1288,33 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.EPC_VAR, "var"),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.DOT, "."),
-        Token(TokenKind.LT, "<"),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.EPC_ASSIGN, ":="),
         Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.GT, ">"),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
         Token(TokenKind.DOT, "."),
         Token(TokenKind.INTEGER, "0"),
         Token(TokenKind.EPC_THREAD_COMPOSITION, "|"),
         Token(TokenKind.EPC_VAR, "var"),
         Token(TokenKind.IDENTIFIER, "y"),
         Token(TokenKind.DOT, "."),
-        Token(TokenKind.LT, "<"),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
         Token(TokenKind.IDENTIFIER, "y"),
         Token(TokenKind.EPC_ASSIGN, ":="),
         Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.GT, ">"),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
         Token(TokenKind.DOT, "."),
         Token(TokenKind.INTEGER, "0"),
         Token(TokenKind.EPC_THREAD_COMPOSITION, "|"),
         Token(TokenKind.EPC_VAR, "var"),
         Token(TokenKind.IDENTIFIER, "z"),
         Token(TokenKind.DOT, "."),
-        Token(TokenKind.LT, "<"),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
         Token(TokenKind.IDENTIFIER, "z"),
         Token(TokenKind.EPC_ASSIGN, ":="),
         Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.GT, ">"),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
         Token(TokenKind.DOT, "."),
         Token(TokenKind.INTEGER, "0"),
         Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
@@ -1330,7 +1358,7 @@ class LexerTest extends AnyFunSuite {
 
   test("Recognizes EPC sending a message on a channel") {
     val inputSpec =
-      """c@2<x>""".stripMargin
+      """c@2<<x>>""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
@@ -1338,9 +1366,9 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.IDENTIFIER, "c"),
         Token(TokenKind.AT, "@"),
         Token(TokenKind.INTEGER, "2"),
-        Token(TokenKind.LT, "<"),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
         Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.GT, ">"),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
         Token(TokenKind.EOF, null)
       )
     )
@@ -1348,7 +1376,7 @@ class LexerTest extends AnyFunSuite {
 
   test("Recognizes EPC traveling messages") {
     val inputSpec =
-      """c{1 -> 2}<1>""".stripMargin
+      """c{1 -> 2}<<1>>""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
@@ -1359,9 +1387,9 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.RIGHT_ARROW, "->"),
         Token(TokenKind.INTEGER, "2"),
         Token(TokenKind.RIGHT_CURLY_BRACKET, "}"),
-        Token(TokenKind.LT, "<"),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
         Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.GT, ">"),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
         Token(TokenKind.EOF, null)
       )
     )

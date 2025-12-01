@@ -74,7 +74,12 @@ class ParserTest extends AnyFunSuite {
       """VARIABLES x, y, z""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
-    assert(ast == VariableDeclaration(List(Identifier("x"), Identifier("y"), Identifier("z"))))
+    assert(ast ==
+      VariableDeclaration(
+        Token(TokenKind.VARIABLES, "VARIABLES"),
+        List(Identifier("x"), Identifier("y"), Identifier("z"))
+      )
+    )
   }
 
   test("Parses CONSTANT declarations") {
@@ -1758,12 +1763,18 @@ class ParserTest extends AnyFunSuite {
       Identifier("Outer"),
       ExtendsStatement(Nil),
       List(
-        VariableDeclaration(List(Identifier("x"))),
+        VariableDeclaration(
+          Token(TokenKind.VARIABLE, "VARIABLE"),
+          List(Identifier("x"))
+        ),
         Module(
           Identifier("Inner"),
           ExtendsStatement(Nil),
           List(
-            VariableDeclaration(List(Identifier("y"))),
+            VariableDeclaration(
+              Token(TokenKind.VARIABLE, "VARIABLE"),
+              List(Identifier("y"))
+            ),
             OperatorDefinition(
               NonFixLHS(
                 Identifier("S"),
@@ -1894,5 +1905,696 @@ class ParserTest extends AnyFunSuite {
       )))
   }
 
+  test("Parses enumerators with equal operator") {
+    val inputSpec =
+      """(A = 1)""".stripMargin
 
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseEnumerator().toOption.get
+    assert(ast ==
+      BoundedEnumerator(
+        Identifier("A"),
+        "=",
+        Literal(1)
+      )
+    )
+  }
+
+  test("Parses enumerators with \\in operator") {
+    val inputSpec =
+      """(p \in 1..10)""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseEnumerator().toOption.get
+    assert(ast ==
+      BoundedEnumerator(
+        Identifier("p"),
+        "\\in",
+        BinaryExpression(
+          "..",
+          Literal(1),
+          Literal(10)
+        )
+      )
+    )
+  }
+
+  test("Parses enumerators with \\in operator and filter condition") {
+    val inputSpec =
+      """(j \in 1..10 : j # self)""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseEnumerator().toOption.get
+    assert(ast ==
+      BoundedEnumeratorWithFilter(
+        Identifier("j"),
+        "\\in",
+        BinaryExpression(
+          "..",
+          Literal(1),
+          Literal(10)
+        ),
+        BinaryExpression(
+          "#",
+          Identifier("j"),
+          Identifier("self")
+        )
+      )
+    )
+  }
+
+  test("Parses channel definitions") {
+    val inputSpec =
+      """new c""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseChannelDefinition().toOption.get
+    assert(ast ==
+      ChannelDefinition(
+        Identifier("c"),
+      )
+    )
+  }
+
+  test("Parses travelling messages") {
+    val inputSpec =
+      """c_{1 -> 2}<< "Hello" >>""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseTravellingMessage().toOption.get
+    assert(ast ==
+      TravellingMessage(
+        Identifier("c_"),
+        Literal(1),
+        Literal(2),
+        Literal("Hello")
+      )
+    )
+  }
+
+  test("Parses outgoing messages") {
+    val inputSpec =
+      """c@2<< "Hello" >>""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseOutgoingMessage().toOption.get
+    assert(ast ==
+      OutgoingMessage(
+        Identifier("c"),
+        Literal(2),
+        Literal("Hello")
+      )
+    )
+  }
+
+  test("Parses outgoing messages (2)") {
+    val inputSpec =
+      """getChannel[i, j]@j<< [type |-> "request", clock |-> 0] >>""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseOutgoingMessage().toOption.get
+    assert(ast ==
+      OutgoingMessage(
+        FunctionApplication(
+          Identifier("getChannel"),
+          List(
+            Identifier("i"),
+            Identifier("j")
+          )
+        ),
+        Identifier("j"),
+        ExplicitFunction(
+          List(
+            Mapping(Identifier("type"), Literal("request")),
+            Mapping(Identifier("clock"), Literal(0))
+          )
+        )
+      )
+    )
+  }
+
+  test("Parses explicit multiset of travelling messages") {
+    val inputSpec =
+      """{{ c_{1 -> 2}<< "Hello" >>, c_{"a" -> "b"}<< "Hello again" >> }}""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExplicitMultiSetOfTravellingMessages().toOption.get
+    assert(ast ==
+      ExplicitMultiSet(
+        List(
+          TravellingMessage(
+            Identifier("c_"),
+            Literal(1),
+            Literal(2),
+            Literal("Hello")
+          ),
+          TravellingMessage(
+            Identifier("c_"),
+            Literal("a"),
+            Literal("b"),
+            Literal("Hello again")
+          ),
+        )
+      )
+    )
+  }
+
+  test("Parses explicit multiset of outgoing messages") {
+    val inputSpec =
+      """{{ c@2<<"Hello">>, c@"a"<< <<1,2,3>> >> }}""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExplicitMultiSetOfOutgoingMessages().toOption.get
+    assert(ast ==
+      ExplicitMultiSet(
+        List(
+          OutgoingMessage(
+            Identifier("c"),
+            Literal(2),
+            Literal("Hello")
+          ),
+          OutgoingMessage(
+            Identifier("c"),
+            Literal("a"),
+            Tuple(
+              List(
+                Literal(1),
+                Literal(2),
+                Literal(3)
+              )
+            )
+          ),
+        )
+      )
+    )
+  }
+
+  test("Parses quantified multiset of travelling messages") {
+    val inputSpec =
+      """{{ (j \in 1..10) c_{1 -> j}<< "Hello" >> }}""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseQuantifiedMultiSetOfTravellingMessages().toOption.get
+    assert(ast ==
+      QuantifiedMultiSet(
+        BoundedEnumerator(
+          Identifier("j"),
+          "\\in",
+          BinaryExpression(
+            "..",
+            Literal(1),
+            Literal(10)
+          )
+        ),
+        TravellingMessage(
+          Identifier("c_"),
+          Literal(1),
+          Identifier("j"),
+          Literal("Hello")
+        )
+      )
+    )
+  }
+
+  test("Parses quantified multiset of outgoing messages") {
+    val inputSpec =
+      """{{ (j \in 1..10 : j # self) c@j<< "Hello" >> }}""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseQuantifiedMultiSetOfOutgoingMessages().toOption.get
+    assert(ast ==
+      QuantifiedMultiSet(
+        BoundedEnumeratorWithFilter(
+          Identifier("j"),
+          "\\in",
+          BinaryExpression(
+            "..",
+            Literal(1),
+            Literal(10)
+          ),
+          BinaryExpression(
+            "#",
+            Identifier("j"),
+            Identifier("self")
+          )
+        ),
+        OutgoingMessage(
+          Identifier("c"),
+          Identifier("j"),
+          Literal("Hello")
+        )
+      )
+    )
+  }
+
+  test("Parses variable declarations") {
+    val inputSpec =
+      """var x""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseDeclaration().toOption.get
+    assert(ast ==
+      Declaration(
+        Identifier("x")
+      )
+    )
+  }
+
+  test("Parses variable assignments") {
+    val inputSpec =
+      """<< x := 10 >>""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseAssignment().toOption.get
+    assert(ast ==
+      Assignment(
+        Identifier("x"),
+        Literal(10)
+      )
+    )
+  }
+
+  test("Parses receive actions") {
+    val inputSpec =
+      """c@2(x)""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseReceive().toOption.get
+    assert(ast ==
+      Receive(
+        Identifier("c"),
+        Literal(2),
+        Identifier("x")
+      )
+    )
+  }
+
+  test("Parses send actions with explicit multiset") {
+    val inputSpec =
+      """{{ c@1<< 1 >>,  c@2<< 2 >> }}""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseSend().toOption.get
+    assert(ast ==
+      Send(
+        ExplicitMultiSet(
+          List(
+            OutgoingMessage(
+              Identifier("c"),
+              Literal(1),
+              Literal(1)
+            ),
+            OutgoingMessage(
+              Identifier("c"),
+              Literal(2),
+              Literal(2)
+            ),
+          )
+        )
+      )
+    )
+  }
+
+  test("Parses send actions with quantified multiset") {
+    val inputSpec =
+      """{{ (i \in 1..2 : i # self) c@i<< self >> }}""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseSend().toOption.get
+    assert(ast ==
+      Send(
+        QuantifiedMultiSet(
+          BoundedEnumeratorWithFilter(
+            Identifier("i"),
+            "\\in",
+            BinaryExpression(
+              "..",
+              Literal(1),
+              Literal(2)
+            ),
+            BinaryExpression(
+              "#",
+              Identifier("i"),
+              Identifier("self")
+            )
+          ),
+          OutgoingMessage(
+            Identifier("c"),
+            Identifier("i"),
+            Identifier("self")
+          )
+        )
+      )
+    )
+  }
+
+  test("Parses empty processes") {
+    val inputSpec =
+      """0""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
+    assert(ast ==
+      EmptyProcess()
+    )
+  }
+
+  test("Parses threads with declarations and assignments") {
+    val inputSpec =
+      """var x . << x := 10 >> . 0""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
+    assert(ast ==
+      ActionPrefix(
+        Declaration(
+          Identifier("x")
+        ),
+        ActionPrefix(
+          Assignment(
+            Identifier("x"),
+            Literal(10)
+          ),
+          EmptyProcess()
+        )
+      )
+    )
+  }
+
+  test("Parses threads with declarations and receive actions") {
+    val inputSpec =
+      """var x . c@2(x) . 0""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
+    assert(ast ==
+      ActionPrefix(
+        Declaration(
+          Identifier("x")
+        ),
+        ActionPrefix(
+          Receive(
+            Identifier("c"),
+            Literal(2),
+            Identifier("x")
+          ),
+          EmptyProcess()
+        )
+      )
+    )
+  }
+
+  test("Parses threads with send actions") {
+    val inputSpec =
+      """ {{ c@2<<"Hello">> }} . 0""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
+    assert(ast ==
+      ActionPrefix(
+        Send(
+          ExplicitMultiSet(
+            List(
+              OutgoingMessage(
+                Identifier("c"),
+                Literal(2),
+                Literal("Hello")
+              )
+            )
+          )
+        ),
+        EmptyProcess()
+      )
+    )
+  }
+
+  test("Parses conditional threads") {
+    val inputSpec =
+      """if 1 = 1 then var x. 0 else var y. 0""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
+    assert(ast ==
+      ConditionalThread(
+        BinaryExpression(
+          "=",
+          Literal(1),
+          Literal(1)
+        ),
+        ActionPrefix(
+          Declaration(
+            Identifier("x")
+          ),
+          EmptyProcess()
+        ),
+        ActionPrefix(
+          Declaration(
+            Identifier("y")
+          ),
+          EmptyProcess()
+        ),
+      )
+    )
+  }
+
+  test("Parses thread instantiations") {
+    val inputSpec =
+      """foo()""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
+    assert(ast ==
+      ThreadInstantiation(
+        Identifier("foo")
+      )
+    )
+  }
+
+  test("Parses thread compositions") {
+    val inputSpec =
+      """(var x. 0) | (var y. 0) | (var z . 0)""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
+    assert(ast ==
+      ThreadComposition(
+        ThreadComposition(
+          ActionPrefix(
+            Declaration(
+              Identifier("x")
+            ),
+            EmptyProcess()
+          ),
+          ActionPrefix(
+            Declaration(
+              Identifier("y")
+            ),
+            EmptyProcess()
+          )
+        ),
+        ActionPrefix(
+          Declaration(
+            Identifier("z")
+          ),
+          EmptyProcess()
+        )
+      )
+    )
+  }
+
+  test("Parses processes") {
+    val inputSpec =
+      """[[ [x |-> Initialized] <| << x := 10 >> . 0 ]]""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseProcess().toOption.get
+    assert(ast ==
+      Process(
+        ExplicitFunction(
+          List(
+            Mapping(
+              Identifier("x"),
+              Identifier("Initialized")
+            )
+          )
+        ),
+        ActionPrefix(
+          Assignment(
+            Identifier("x"),
+            Literal(10)
+          ),
+          EmptyProcess()
+        )
+      )
+    )
+  }
+
+  test("Parses networks with single locations") {
+    val inputSpec =
+      """(p = 1) [[ [] <| 0 ]]""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseNetwork().toOption.get
+    assert(ast ==
+      Location(
+        BoundedEnumerator(
+          Identifier("p"),
+          "=",
+          Literal(1)
+        ),
+        Process(
+          ExplicitFunction(Nil),
+          EmptyProcess()
+        )
+      )
+    )
+  }
+
+  test("Parses networks with multiple locations") {
+    val inputSpec =
+      """(p \in 1..10) [[ [] <| 0 ]]""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseNetwork().toOption.get
+    assert(ast ==
+      Location(
+        BoundedEnumerator(
+          Identifier("p"),
+          "\\in",
+          BinaryExpression(
+            "..",
+            Literal(1),
+            Literal(10)
+          )
+        ),
+        Process(
+          ExplicitFunction(Nil),
+          EmptyProcess()
+        )
+      )
+    )
+  }
+
+  test("Parses networks with message aether") {
+    val inputSpec =
+      """{{ c_{1 -> 2}<< "Hello" >> }}""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseNetwork().toOption.get
+    assert(ast ==
+      MessageAether(
+        ExplicitMultiSet(
+          List(
+            TravellingMessage(
+              Identifier("c_"),
+              Literal(1),
+              Literal(2),
+              Literal("Hello")
+            )
+          )
+        )
+      )
+    )
+  }
+
+  test("Parses network compositions") {
+    val inputSpec =
+      """(p = 1) [[ [] <| 0 ]] || {{ c_{1 -> 2}<< "Hello" >> }}""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseNetwork().toOption.get
+    assert(ast ==
+      NetworkComposition(
+        Location(
+          BoundedEnumerator(
+            Identifier("p"),
+            "=",
+            Literal(1)
+          ),
+          Process(
+            ExplicitFunction(Nil),
+            EmptyProcess()
+          )
+        ),
+        MessageAether(
+          ExplicitMultiSet(
+            List(
+              TravellingMessage(
+                Identifier("c_"),
+                Literal(1),
+                Literal(2),
+                Literal("Hello")
+              )
+            )
+          )
+        )
+      )
+    )
+  }
+
+  test("Parses network compositions (left-associatively)") {
+    val inputSpec =
+      """(p = 1) [[ [] <| 0 ]] || {{ c_{1 -> 2}<< "Hello" >> }} || (q = 2) [[ [] <| 0 ]]""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseNetwork().toOption.get
+    assert(ast ==
+      NetworkComposition(
+        NetworkComposition(
+          Location(
+            BoundedEnumerator(
+              Identifier("p"),
+              "=",
+              Literal(1)
+            ),
+            Process(
+              ExplicitFunction(Nil),
+              EmptyProcess()
+            )
+          ),
+          MessageAether(
+            ExplicitMultiSet(
+              List(
+                TravellingMessage(
+                  Identifier("c_"),
+                  Literal(1),
+                  Literal(2),
+                  Literal("Hello")
+                )
+              )
+            )
+          )
+        ),
+        Location(
+          BoundedEnumerator(
+            Identifier("q"),
+            "=",
+            Literal(2)
+          ),
+          Process(
+            ExplicitFunction(Nil),
+            EmptyProcess()
+          )
+        ),
+      )
+    )
+  }
+
+  test("Parses network compositions with parentheses") {
+    val inputSpec =
+      """(p = 1) [[ [] <| 0 ]] || ( {{ c_{1 -> 2}<< "Hello" >> }} || (q = 2) [[ [] <| 0 ]] )""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseNetwork().toOption.get
+    assert(ast ==
+      NetworkComposition(
+        Location(
+          BoundedEnumerator(
+            Identifier("p"),
+            "=",
+            Literal(1)
+          ),
+          Process(
+            ExplicitFunction(Nil),
+            EmptyProcess()
+          )
+        ),
+        NetworkComposition(
+          MessageAether(
+            ExplicitMultiSet(
+              List(
+                TravellingMessage(
+                  Identifier("c_"),
+                  Literal(1),
+                  Literal(2),
+                  Literal("Hello")
+                )
+              )
+            )
+          ),
+          Location(
+            BoundedEnumerator(
+              Identifier("q"),
+              "=",
+              Literal(2)
+            ),
+            Process(
+              ExplicitFunction(Nil),
+              EmptyProcess()
+            )
+          )
+        )
+      )
+    )
+  }
 }

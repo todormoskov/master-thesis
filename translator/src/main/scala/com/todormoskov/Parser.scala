@@ -41,7 +41,7 @@ case class ExtendsStatement(extendedModules: List[Identifier]) extends AST
  *
  * VariableDeclaration := ['VARIABLE' | 'VARIABLES'] CommaList(Identifier)
  */
-case class VariableDeclaration(variables: List[Identifier]) extends ModuleUnit
+case class VariableDeclaration(variableToken: Token, variables: List[Identifier]) extends ModuleUnit
 /**
  * Constant declarations.
  *
@@ -286,6 +286,150 @@ case class StrongFairness(state: Expression, action: Expression) extends Express
  */
 case class AtSign() extends Expression
 
+/**
+ * EPC Specifications.
+ */
+case class EPCSpec() extends ModuleUnit
+
+sealed trait Enumerator
+/**
+ * BoundedEnumerator := '(' Identifier ['=' | '\in'] Expression')'
+ *
+ * E.g. (A = 1), (Q = "a"), (p \in 1..10), (q \in {"a", "b"}), ...
+ */
+case class BoundedEnumerator(name: Identifier, equalOrIn: String, domain: Expression) extends Enumerator
+/**
+ * BoundedEnumeratorWithFilter := '(' Identifier ['=' | '\in'] Expression ':' Expression ')'
+ *
+ * E.g. (j \in 1..10 : j # self)
+ */
+case class BoundedEnumeratorWithFilter(name: Identifier, equalOrIn: String, domain: Expression, filter: Expression) extends Enumerator
+/**
+ * ChannelDefinition := 'new' Identifier
+ *
+ * E.g. new c
+ */
+case class ChannelDefinition(identifier: Identifier) extends AST
+/**
+ * TravellingMessage := Identifier '_' '{' Literal '->' Literal '}' '<<' Expression '>>'
+ *
+ * E.g. c_{1 -> 2}<< "Hello" >>, c_{"a" -> "b"}<< "Hello again" >>, ...
+ */
+case class TravellingMessage(channel: Identifier, source: Expression, target: Expression, value: Expression) extends AST
+/**
+ * An outgoing message. These messages are part of send actions.
+ *
+ * OutgoingMessage := Expression '@' Expression '<<' Expression '>>'
+ *
+ * E.g. c@2<<"Hello">>, c@"a"<< <<1,2,3>> >>
+ */
+case class OutgoingMessage(channel: Expression, target: Expression, value: Expression) extends AST
+/**
+ * MultiSet := ExplicitMultiSet | QuantifiedMultiSet
+ */
+sealed trait MultiSet[T] extends AST
+/**
+ * ExplicitMultiSet := '{{' CommaList(Expression) '}}'
+ */
+case class ExplicitMultiSet[T](values: List[T]) extends MultiSet[T]
+/**
+ * QuantifiedMultiSet := '{{' Enumerator Expression '}}'
+ */
+case class QuantifiedMultiSet[T](enumerator: Enumerator, value: T) extends MultiSet[T]
+/**
+ * Action := Declaration | Assignment | Receive | Send
+ */
+sealed trait Action extends AST
+/**
+ * Declaration := 'var' Identifier
+ *
+ * E.g. var x, var y, ...
+ */
+case class Declaration(identifier: Identifier) extends Action
+/**
+ * Assignment := '<<' Identifier ':=' Expression '>>'
+ *
+ * E.g. << x := 10 >>
+ */
+case class Assignment(identifier: Identifier, expression: Expression) extends Action
+/**
+ * Receive := Expression '@' Expression '(' Identifier ')'
+ *
+ * e.g. c@2(x)
+ */
+case class Receive(channel: Expression, location: Expression, variable: Identifier) extends Action
+/**
+ * Send := MultiSet(OutgoingMessage)
+ *
+ * e.g. {{ c@1<< ... >>,  c@2<< ... >> }}, {{ (i \in 1..2 : i # self) c@i<< ... >> }}
+ */
+case class Send(messages: MultiSet[OutgoingMessage]) extends Action
+/**
+ * Guard := EmptyProcess | ActionPrefix
+ */
+sealed trait Guard extends Thread
+/**
+ * EmptyProcess := '0'
+ */
+case class EmptyProcess() extends Guard
+/**
+ * ActionPrefix := Action '.' Thread
+ *
+ * E.g. var x . << x := 10 >> . 0
+ */
+case class ActionPrefix(action: Action, continuation: Thread) extends Guard
+/**
+ * Thread := Guard | ConditionalThread | ThreadInstantiation | ThreadComposition
+ */
+trait Thread extends AST
+/**
+ * ConditionalThread := 'if' Expression 'then' Thread 'else' Thread
+ *
+ * E.g. if ... then ... else ...
+ */
+case class ConditionalThread(cond: Expression, thenThread: Thread, elseThread: Thread) extends Thread
+/**
+ * ThreadInstantiation := Identifier'()'
+ *
+ * E.g. foo(), bar()
+ */
+case class ThreadInstantiation(thread: Identifier) extends Thread
+/**
+ * ThreadComposition := Thread | Thread
+ *
+ * E.g. var x . 0 | var y . 0
+ */
+case class ThreadComposition(lhs: Thread, rhs: Thread) extends Thread
+/**
+ * Network := Location | MessageAether | NetworkComposition
+ */
+sealed trait Network extends AST
+/**
+ * Process := '[[' ExplicitFunction '<|' Thread ']]'
+ *
+ * E.g. [[ [x |-> Undefined] <| var x. << x := 10 >> . 0 ]]
+ */
+case class Process(memory: ExplicitFunction, body: Thread) extends AST
+/**
+ * LocationComprehension := Enumerator Process
+ *
+ * E.g. (p = 1) [[ [x |-> Undefined] |> var x. << x := 10 >>. 0 ]]
+ *      (p \in 1..10) [[ [x |-> Undefined] |> var x. << x := 10 >>. 0 ]]
+ */
+case class Location(enumerator: Enumerator, body: Process) extends Network
+/**
+ * MessageAether := ExplicitMultiset(TravellingMessage) | QuantifiedMultiSet(TravellingMessage)
+ *
+ * E.g. {{ c_{1 -> 2}<< ... >>, c_{"a" -> "b"}<< ... >> }} or {{ (i \in 1..2) c@i<< ... >> }}
+ */
+case class MessageAether(messages: MultiSet[TravellingMessage]) extends Network
+/**
+ * NetworkComposition := Network '||' Network
+ *
+ * E.g. (p = 1) [[ [x |-> Initialized] <| c@2(x) . 0 ]] || {{ c_{2 -> 1}<< "Hello from 2" >> }}
+ */
+case class NetworkComposition(lhs: Network, rhs: Network) extends Network
+
 class Parser(lexer: Tokenizer) {
 
   /**
@@ -324,7 +468,7 @@ class Parser(lexer: Tokenizer) {
     if check(expected)
       then Right(lexer.consume())
       else Left(s"Syntax error: token of kind $expected not found!")
-
+  
   /**
    * Parses a comma-separated list of objects (identifiers, expressions, ...).
    *
@@ -414,7 +558,8 @@ class Parser(lexer: Tokenizer) {
     TokenKind.INSTANCE,
     TokenKind.ASSUME,
     TokenKind.THEOREM,
-    TokenKind.MINUS_SEPARATOR)
+    TokenKind.MINUS_SEPARATOR,
+    TokenKind.EPC_CONTEXT_OPEN)
 
   /**
    * Check if the next token is one of the possible first tokens of a module unit.
@@ -438,6 +583,7 @@ class Parser(lexer: Tokenizer) {
    *        | Theorem
    *        | Module
    *        | MinusSeparator ( = AtLeast4("-"))
+   *        | EPCSpec
    */
   def parseModuleUnit(): Either[String, ModuleUnit] =
     lexer.peek() match {
@@ -451,6 +597,8 @@ class Parser(lexer: Tokenizer) {
       case Token(TokenKind.ASSUME, _) => parseAssumption()
       case Token(TokenKind.THEOREM, _) => parseTheorem()
       case Token(TokenKind.MINUS_SEPARATOR, _) => parseNestedModuleOrSeparator()
+      // Here we also treat EPC specs as module units!!!
+      case Token(TokenKind.EPC_CONTEXT_OPEN, _) => parseEPCSpec()
       case _ => Left("Syntax Error: Module unit expected")
     }
 
@@ -512,11 +660,10 @@ class Parser(lexer: Tokenizer) {
    * @return
    */
   private def parseVariableDeclaration(): Either[String, VariableDeclaration] =
-    if check(TokenKind.VARIABLE) || check(TokenKind.VARIABLES) then for {
-      _ <- if check(TokenKind.VARIABLE) then consume(TokenKind.VARIABLE) else consume(TokenKind.VARIABLES)
+    for {
+      token <- if check(TokenKind.VARIABLE) then consume(TokenKind.VARIABLE) else consume(TokenKind.VARIABLES)
       declaredVariables <- parseCommaListOfIdentifiers()
-    } yield VariableDeclaration(declaredVariables)
-    else Right(VariableDeclaration(Nil))
+    } yield VariableDeclaration(token, declaredVariables)
 
   /**
    * Parse a constant declaration.
@@ -1195,7 +1342,7 @@ class Parser(lexer: Tokenizer) {
       then for ifThenElse <- parseIfThenElse() yield ifThenElse
     else if check(TokenKind.AT)
       then for _ <- consume(TokenKind.AT) yield AtSign()
-    else Left("Syntax Error: Expression expected")
+    else Left("Syntax Error: Expression expected!")
 
   /**
    * Parse a general identifier and then "simplify" it.
@@ -1824,4 +1971,471 @@ class Parser(lexer: Tokenizer) {
       _ <- consume(TokenKind.ELSE)
       elseExpr <- parseExpression()
     } yield IfThenElse(cond, thenExpr, elseExpr)
+
+
+  private def parseEPCSpec(): Either[String, EPCSpec] = ???
+
+  /**
+   * Parses an EPC enumerator.
+   *
+   * Enumerator := '(' Identifier ['=' | '\in'] Expression ')'
+   * BoundedEnumeratorWithFilter := '(' Identifier ['=' | '\in'] Expression ':' Expression ')'
+   *
+   * E.g.
+   * Bounded enumerators: (A = 1), (Q = "a"), (p \in 1..10), (q \in {"a", "b"}), ...
+   * Bounded enumerators with filters: (j \in 1..10 : j # self)
+   */
+  def parseEnumerator(): Either[String, Enumerator] =
+    for {
+      _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
+      identifier <- parseIdentifier()
+      token <- if check(TokenKind.EQ) then consume(TokenKind.EQ) else consume(TokenKind.SET_IN)
+      domain <- parseExpression()
+      enumerator <-
+        if check(TokenKind.COLON) then for {
+          _ <- consume(TokenKind.COLON)
+          guardExpr <- parseExpression()
+          _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
+        } yield BoundedEnumeratorWithFilter(identifier, token.value, domain, guardExpr)
+        else for {
+          _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
+        } yield BoundedEnumerator(identifier, token.value, domain)
+    } yield enumerator
+
+  /**
+   * Parse a channel definition.
+   *
+   * ChannelDefinition := 'new' Identifier
+   *
+   * E.g. new c
+   */
+  def parseChannelDefinition(): Either[String, ChannelDefinition] =
+    for {
+      _ <- consume(TokenKind.EPC_NEW)
+      identifier <- parseIdentifier()
+    } yield ChannelDefinition(identifier)
+
+  /**
+   * Parse a travelling message.
+   *
+   * TravellingMessage := Identifier '_' '{' Literal '->' Literal '}' '<<' Expression '>>'
+   *
+   * E.g. c_{1 -> 2}<< "Hello" >>, c_{"a" -> "b"}<< "Hello again" >>, ...
+   */
+  def parseTravellingMessage(): Either[String, TravellingMessage] =
+    for {
+      channel <- parseIdentifier()
+      // _ gets recognized as part of the identifier.
+      // _ <- consume(TokenKind.UNDERSCORE)
+      _ <- consume(TokenKind.LEFT_CURLY_BRACKET)
+      source <- parseExpression()
+      _ <- consume(TokenKind.RIGHT_ARROW)
+      target <- parseExpression()
+      _ <- consume(TokenKind.RIGHT_CURLY_BRACKET)
+      _ <- consume(TokenKind.LEFT_ANGLE_BRACKET)
+      message <- parseExpression()
+      _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
+    } yield TravellingMessage(channel, source, target, message)
+
+  /**
+   * Parse a comma-separated list of travelling messages.
+   */
+  private def parseCommaListOfTravellingMessages(): Either[String, List[TravellingMessage]] =
+    parseCommaList[TravellingMessage](() => parseTravellingMessage())
+
+  /**
+   * Parse an outgoing message.
+   *
+   * OutgoingMessage := Expression '@' Expression '<<' Expression '>>'
+   *
+   * E.g. c@2<<"Hello">>, c@"a"<< <<1,2,3>> >>
+   */
+  def parseOutgoingMessage(): Either[String, OutgoingMessage] =
+    for {
+      channel <- parseExpression()
+      _ <- consume(TokenKind.AT)
+      target <- parseExpression()
+      _ <- consume(TokenKind.LEFT_ANGLE_BRACKET)
+      value <- parseExpression()
+      _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
+    } yield OutgoingMessage(channel, target, value)
+
+  /**
+   * Parse a comma-separated list of outgoing messages.
+   */
+  private def parseCommaListOfOutgoingMessages(): Either[String, List[OutgoingMessage]] =
+    parseCommaList[OutgoingMessage](() => parseOutgoingMessage())
+
+  /**
+   * Parse an explicit multiset.
+   *
+   * ExplicitMultiSet := '{{' CommaList(Expression) '}}'
+   */
+  private def parseExplicitMultiSet[T](consumer: () => Either[String, List[T]]): Either[String, MultiSet[T]] =
+    for {
+      _ <- consume(TokenKind.EPC_MULTISET_OPEN)
+      values <- consumer()
+      _ <- consume(TokenKind.EPC_MULTISET_CLOSE)
+    } yield ExplicitMultiSet(values)
+
+  /**
+   * Parse an explicit multiset of travelling messages.
+   */
+  def parseExplicitMultiSetOfTravellingMessages(): Either[String, MultiSet[TravellingMessage]] =
+    parseExplicitMultiSet[TravellingMessage](() => parseCommaListOfTravellingMessages())
+
+  /**
+   * Parse an explicit multiset of outgoing messages.
+   */
+  def parseExplicitMultiSetOfOutgoingMessages(): Either[String, MultiSet[OutgoingMessage]] =
+    parseExplicitMultiSet[OutgoingMessage](() => parseCommaListOfOutgoingMessages())
+
+  /**
+   * Parse a quantified multiset.
+   *
+   * QuantifiedMultiSet := '{{' Enumerator '}}'
+   */
+  private def parseQuantifiedMultiSet[T](consumer: () => Either[String, T]) =
+    for {
+      _ <- consume(TokenKind.EPC_MULTISET_OPEN)
+      enumerator <- parseEnumerator()
+      value <- consumer()
+      _ <- consume(TokenKind.EPC_MULTISET_CLOSE)
+    } yield QuantifiedMultiSet(enumerator, value)
+
+  /**
+   * Parse a quantified multiset of travelling messages.
+   */
+  def parseQuantifiedMultiSetOfTravellingMessages(): Either[String, MultiSet[TravellingMessage]] =
+    parseQuantifiedMultiSet[TravellingMessage](() => parseTravellingMessage())
+
+  /**
+   * Parse a quantified multiset of outgoing messages.
+   */
+  def parseQuantifiedMultiSetOfOutgoingMessages(): Either[String, MultiSet[OutgoingMessage]] =
+    parseQuantifiedMultiSet[OutgoingMessage](() => parseOutgoingMessage())
+
+  /**
+   * Action := Declaration | Assignment | Receive | Send
+   */
+  def parseAction(): Either[String, Action] =
+    for {
+      action <-
+        if check(TokenKind.EPC_VAR)
+          then parseDeclaration()
+        else if check(TokenKind.LEFT_ANGLE_BRACKET)
+          then parseAssignment()
+        else if check(TokenKind.IDENTIFIER)
+          then parseReceive()
+        else if check(TokenKind.EPC_MULTISET_OPEN)
+          then parseSend()
+        else Left("Syntax error: action expected!")
+    } yield action
+
+  /**
+   * Parse declaration of a variable.
+   *
+   * Declaration := 'var' Identifier
+   *
+   * E.g. var x, var y, ...
+   */
+  def parseDeclaration(): Either[String, Declaration] =
+    for {
+      _ <- consume(TokenKind.EPC_VAR)
+      identifier <- parseIdentifier()
+    } yield Declaration(identifier)
+
+  /**
+   * Parse an assignment to a variable.
+   *
+   * Assignment := '<<' Identifier ':=' Expression '>>'
+   *
+   * E.g. << x := 10 >>
+   */
+  def parseAssignment(): Either[String, Assignment] =
+    for {
+      _ <- consume(TokenKind.LEFT_ANGLE_BRACKET)
+      identifier <- parseIdentifier()
+      _ <- consume(TokenKind.EPC_ASSIGN)
+      expression <- parseExpression()
+      _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
+    } yield Assignment(identifier, expression)
+
+  /**
+   * Parse a "receive" action.
+   *
+   * Receive := Expression '@' Expression '(' Identifier ')'
+   *
+   * e.g. c@2(x)
+   */
+  def parseReceive(): Either[String, Receive] =
+    for {
+      channel <- parseExpression()
+      _ <- consume(TokenKind.AT)
+      location <- parseExpression()
+      _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
+      variable <- parseIdentifier()
+      _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
+    } yield Receive(channel, location, variable)
+
+  /**
+   * Parse a send action.
+   *
+   * Send := MultiSet(OutgoingMessage)
+   *
+   * e.g. {{ c@1<< ... >>,  c@2<< ... >> }}, {{ (i \in 1..2 : i # self) c@i<< ... >> }}
+   */
+  def parseSend(): Either[String, Send] =
+    for {
+      multiSet <-
+        if check(List(TokenKind.EPC_MULTISET_OPEN, TokenKind.LEFT_ROUND_BRACKET, TokenKind.IDENTIFIER, TokenKind.EQ))
+          then parseQuantifiedMultiSetOfOutgoingMessages()
+        else if check(List(TokenKind.EPC_MULTISET_OPEN, TokenKind.LEFT_ROUND_BRACKET, TokenKind.IDENTIFIER, TokenKind.SET_IN))
+          then parseQuantifiedMultiSetOfOutgoingMessages()
+        else parseExplicitMultiSetOfOutgoingMessages()
+    } yield Send(multiSet)
+
+  /**
+   * Parse a guard.
+   *
+   * Guard := EmptyProcess | ActionPrefix
+   */
+  def parseGuard(): Either[String, Guard] =
+    lexer.peek() match {
+      case Token(TokenKind.INTEGER, "0") => parseEmptyProcess()
+      case _ => parseActionPrefix()
+    }
+
+  /**
+   * Parse an empty process.
+   *
+   * EmptyProcess := '0'
+   *
+   */
+  def parseEmptyProcess(): Either[String, EmptyProcess] =
+    lexer.peek() match {
+      case Token(TokenKind.INTEGER, "0") => for _ <- consume(TokenKind.INTEGER) yield EmptyProcess()
+      case _ => Left(s"Syntax error: empty process expected!")
+    }
+
+  /**
+   * ActionPrefix := Action '.' Thread
+   *
+   * E.g. var x . << x := 10 >> . 0
+   */
+  def parseActionPrefix(): Either[String, ActionPrefix] =
+    for {
+      action <- parseAction()
+      _ <- consume(TokenKind.DOT)
+      thread <- parseThread()
+    } yield ActionPrefix(action, thread)
+
+  /**
+   * Parse a thread.
+   *
+   * Thread := Guard | ConditionalThread | ThreadInstantiation | ThreadComposition
+   */
+  def parseThread(): Either[String, Thread] =
+    parseThreadComposition()
+
+  /**
+   * Parse a thread composition.
+   *
+   * ThreadComposition := Thread | Thread
+   *
+   * E.g. (var x . 0) | (var y . 0)
+   */
+  private def parseThreadComposition(): Either[String, Thread] =
+    for {
+      lhs <- parsePrimaryThread()
+      finalResult <- {
+        def loop(lhs: Thread): Either[String, Thread] = {
+          if check(TokenKind.EPC_THREAD_COMPOSITION) then for {
+            _ <- consume(TokenKind.EPC_THREAD_COMPOSITION)
+            rhs <- parsePrimaryThread()
+            intermediateResult <- loop(ThreadComposition(lhs, rhs))
+          } yield intermediateResult
+          else Right(lhs)
+        }
+        loop(lhs)
+      }
+    } yield finalResult
+
+  /**
+   * Parse a primary thread.
+   *
+   * PrimaryThread := Guard | ConditionalThread | ThreadInstantiation
+   *
+   */
+  private def parsePrimaryThread(): Either[String, Thread] = {
+    if check(List(TokenKind.IDENTIFIER, TokenKind.LEFT_ROUND_BRACKET, TokenKind.RIGHT_ROUND_BRACKET))
+      then parseThreadInstantiation()
+    else lexer.peek() match {
+      // Guards
+      case Token(TokenKind.INTEGER, "0") => parseGuard()
+      case Token(TokenKind.EPC_VAR, _) => parseGuard()
+      case Token(TokenKind.LEFT_ANGLE_BRACKET, _) => parseGuard()
+      case Token(TokenKind.IDENTIFIER, _) => parseGuard()
+      case Token(TokenKind.EPC_MULTISET_OPEN, _) => parseGuard()
+      // Conditional Threads
+      case Token(TokenKind.EPC_IF, _) => parseConditionalThread()
+      // Thread within parenthesis
+      case Token(TokenKind.LEFT_ROUND_BRACKET, _) => for {
+        _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
+        thread <- parseThread()
+        _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
+      } yield thread
+      case _ => Left("Syntax Error: Thread expected!")
+    }
+  }
+
+  /**
+   * Parse a conditional thread.
+   *
+   * ConditionalThread := 'if' Expression 'then' Thread 'else' Thread
+   *
+   * E.g. if ... then ... else ...
+   */
+  private def parseConditionalThread(): Either[String, ConditionalThread] =
+    for {
+      _ <- consume(TokenKind.EPC_IF)
+      condition <- parseExpression()
+      _ <- consume(TokenKind.EPC_THEN)
+      thenThread <- parseThread()
+      _ <- consume(TokenKind.EPC_ELSE)
+      elseThread <- parseThread()
+    } yield ConditionalThread(condition, thenThread, elseThread)
+
+  /**
+   * Parse a thread instantiation.
+   *
+   * ThreadInstantiation := Identifier'()'
+   *
+   * E.g. foo(), bar()
+   */
+  private def parseThreadInstantiation(): Either[String, ThreadInstantiation] =
+    for {
+      identifier <- parseIdentifier()
+      _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
+      _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
+    } yield ThreadInstantiation(identifier)
+
+  /**
+   * Parse a network.
+   *
+   * Network := Location | MessageAether | NetworkComposition
+   */
+  def parseNetwork(): Either[String, Network] =
+    parseNetworkComposition()
+
+  /**
+   * Parse a network composition.
+   *
+   * NetworkComposition := Network '||' Network
+   *
+   * E.g. (p = 1) [[ [x |-> Initialized] <| c@2(x) . 0 ]] || {{ c_{2 -> 1}<< "Hello from 2" >> }}
+   */
+  private def parseNetworkComposition(): Either[String, Network] =
+    for {
+      lhs <- parseLocationOrMessageAether()
+      finalResult <- {
+        def loop(lhs: Network): Either[String, Network] = {
+          if check(TokenKind.EPC_LOC_COMPOSITION) then for {
+            _ <- consume(TokenKind.EPC_LOC_COMPOSITION)
+            rhs <- parseLocationOrMessageAether()
+            intermediateResult <- loop(NetworkComposition(lhs, rhs))
+          } yield intermediateResult
+          else Right(lhs)
+        }
+        loop(lhs)
+      }
+    } yield finalResult
+
+  /**
+   * Parse a location, a message aether, or network within parentheses.
+   *
+   * LocationOrMessageAether := Location | MessageAether
+   *
+   */
+  private def parseLocationOrMessageAether(): Either[String, Network] =
+    // Locations
+    if check(List(TokenKind.LEFT_ROUND_BRACKET, TokenKind.IDENTIFIER, TokenKind.EQ))
+      then parseLocation()
+    else if check(List(TokenKind.LEFT_ROUND_BRACKET, TokenKind.IDENTIFIER, TokenKind.SET_IN))
+      then parseLocation()
+    // Message Aether
+    else if check(TokenKind.EPC_MULTISET_OPEN)
+      then parseMessageAether()
+    // Network within parenthesis
+    else if check(TokenKind.LEFT_ROUND_BRACKET)
+      then for {
+        _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
+        network <- parseNetwork()
+        _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
+      } yield network
+    else Left("Syntax Error: Network expected!")
+
+  /**
+   * Parse a location.
+   *
+   * Location := Enumerator Process
+   *
+   * Examples:
+   * (p = 1) [[ [x |-> Undefined] |> var x. << x := 10 >>. 0 ]]
+   * (p \in 1..10) [[ [x |-> Undefined] |> var x. << x := 10 >>. 0 ]]
+   */
+  def parseLocation(): Either[String, Location] =
+    for {
+      enumerator <- parseEnumerator()
+      process <- parseProcess()
+    } yield Location(enumerator, process)
+
+  /**
+   * Parse a process.
+   *
+   * Process := '[[' ExplicitFunction '<|' Thread ']]'
+   *
+   * E.g. [[ [x |-> Undefined] <| var x. << x := 10 >> . 0 ]]
+   */
+  def parseProcess(): Either[String, Process] =
+    for {
+      _ <- consume(TokenKind.EPC_LOC_SCOPE_OPEN)
+      memory <- parseMemory()
+      _ <- consume(TokenKind.EPC_LOC_MEMORY_CODE_SEP)
+      thread <- parseThread()
+      _ <- consume(TokenKind.EPC_LOC_SCOPE_CLOSE)
+    } yield Process(memory, thread)
+
+  /**
+   * Parse a process memory.
+   *
+   * ProcessMemory := ExplicitFunction
+   *
+   */
+  private def parseMemory(): Either[String, ExplicitFunction] =
+    if check(TokenKind.SQUARE)
+    then for { _ <- consume(TokenKind.SQUARE) } yield ExplicitFunction(Nil)
+    else for {
+      _ <- consume(TokenKind.LEFT_SQUARE_BRACKET)
+      mappings <- parseCommaListOfMappings()
+      _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
+    } yield ExplicitFunction(mappings)
+
+  /**
+   * Parse a message aether.
+   *
+   * MessageAether := MultiSet(TravellingMessage)
+   *
+   * E.g. {{ c_{1 -> 2}<< ... >>, c_{"a" -> "b"}<< ... >> }} or {{ (i \in 1..2) c@i<< ... >> }}
+   */
+  private def parseMessageAether(): Either[String, MessageAether] =
+    for {
+      multiSet <-
+        if check(List(TokenKind.EPC_MULTISET_OPEN, TokenKind.LEFT_ROUND_BRACKET, TokenKind.IDENTIFIER, TokenKind.EQ))
+          then parseQuantifiedMultiSetOfTravellingMessages()
+        else if check(List(TokenKind.EPC_MULTISET_OPEN, TokenKind.LEFT_ROUND_BRACKET, TokenKind.IDENTIFIER, TokenKind.SET_IN))
+          then parseQuantifiedMultiSetOfTravellingMessages()
+        else parseExplicitMultiSetOfTravellingMessages()
+    } yield MessageAether(multiSet)
+
 }

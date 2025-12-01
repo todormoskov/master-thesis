@@ -133,6 +133,8 @@ object Lexer {
     SQSUBSETEQ,
     COLON_LT,
 
+    EPC_CONTEXT_OPEN,
+    EPC_CONTEXT_CLOSE,
     EPC_VAR,
     EPC_ASSIGN,
     EPC_LOC_SCOPE_OPEN,
@@ -196,6 +198,7 @@ object Lexer {
     // State flags
     private var isNewLine: Boolean = true
     private var isLogicalLine: Boolean = false
+    private var isEPCContext: Boolean = false
 
     /**
      * Peeks through the next k number of tokens
@@ -285,6 +288,16 @@ object Lexer {
         }
         if (c == '*') {
           scanner.consume()
+          // If we are in an EPC context (after the --EPC keyword)
+          // and we encounter the symbols "*)", we know that this is
+          // the closing of the comment, in which the spec is defined.
+          // In that case we close the EPC context, and we return a
+          // token indicating that the EPC context has been closed.
+          if (scanner.peek().isDefined && scanner.peek().get == ')') {
+            scanner.consume()
+            isEPCContext = false
+            return Token(TokenKind.EPC_CONTEXT_CLOSE, "")
+          }
           return Token(TokenKind.MUL, "*")
         }
         if (c == '^') {
@@ -349,6 +362,17 @@ object Lexer {
             while (scanner.peek().isDefined && !sbValue.endsWith("*)")) {
               sbValue += scanner.consume().get
               optionChar = scanner.peek()
+
+              // If this comment is opening an EPC spec (with the --EPC keyword)
+              // we stop throwing away its contents, and we continue with the
+              // recognition of the following tokens.
+              // Additionally, we set the isEPCContext variable to true, in order
+              // to be able to recognize that the symbols "*)" are closing the
+              // EPC context and the current comment.
+              if (sbValue.endsWith("--EPC")) {
+                isEPCContext = true
+                return Token(TokenKind.EPC_CONTEXT_OPEN, "--EPC")
+              }
             }
             return consume(keepBuffer = true)
           }
@@ -629,8 +653,8 @@ object Lexer {
             case "then" => Token(TokenKind.EPC_THEN, name)
             case "else" => Token(TokenKind.EPC_ELSE, name)
             case "def" => Token(TokenKind.EPC_DEF, name)
-            case "Undefined" => Token(TokenKind.EPC_UNDEFINED, name)
-            case "Initialized" => Token(TokenKind.EPC_INITIALIZED, name)
+            // case "Undefined" => Token(TokenKind.EPC_UNDEFINED, name)
+            // case "Initialized" => Token(TokenKind.EPC_INITIALIZED, name)
             // Identifier
             case default => Token(TokenKind.IDENTIFIER, name)
           }
