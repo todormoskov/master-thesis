@@ -2163,7 +2163,7 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses receive actions") {
     val inputSpec =
-      """c@2(x)""".stripMargin
+      """c@2?(x)""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseReceive().toOption.get
     assert(ast ==
@@ -2265,7 +2265,7 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses threads with declarations and receive actions") {
     val inputSpec =
-      """var x . c@2(x) . 0""".stripMargin
+      """var x . c@2?(x) . 0""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
     assert(ast ==
@@ -2344,6 +2344,47 @@ class ParserTest extends AnyFunSuite {
     assert(ast ==
       ThreadInstantiation(
         Identifier("foo")
+      )
+    )
+  }
+
+  test("Parses thread definitions with no free variables") {
+    val inputSpec =
+      """def declareXAndStop = var x. 0""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThreadDefinition().toOption.get
+    assert(ast ==
+      ThreadDefinition(
+        Identifier("declareXAndStop"),
+        Nil,
+        ActionPrefix(
+          Declaration(
+            Identifier("x")
+          ),
+          EmptyProcess()
+        )
+      )
+    )
+  }
+
+  test("Parses thread definitions with free variables") {
+    val inputSpec =
+      """def assignXAndStop(x) = << x := 10 >> . 0""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThreadDefinition().toOption.get
+    assert(ast ==
+      ThreadDefinition(
+        Identifier("assignXAndStop"),
+        List(
+          Identifier("x")
+        ),
+        ActionPrefix(
+          Assignment(
+            Identifier("x"),
+            Literal(10)
+          ),
+          EmptyProcess()
+        )
       )
     )
   }
@@ -2597,4 +2638,150 @@ class ParserTest extends AnyFunSuite {
       )
     )
   }
+
+  test("Parses EPC specifications") {
+    val inputSpec =
+      """(* --EPC Consensus
+        | new c
+        |
+        | (l \in 1..n) [[
+        |   [ chan |-> c,
+        |     x |-> input[l],
+        |     r |-> 0,
+        |     output |-> Initialized ] <| L() ]]
+        |
+        | def L(chan, x, r, output) =
+        |   << r := r + 1>> .
+        |   if r <= n
+        |     then if self = r
+        |             then {{ ( j \in 1..n : j # self) chan@j<< x >> }} . L()
+        |             else chan@r?(x) . L()
+        |     else << output := x>> . 0
+        |
+        |*)""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseEPCSpec().toOption.get
+    assert(ast ==
+      EPCSpec(
+        Identifier("Consensus"),
+        List(
+          ChannelDefinition(
+            Identifier("c")
+          ),
+          Location(
+            BoundedEnumerator(
+              Identifier("l"),
+              "\\in",
+              BinaryExpression(
+                "..",
+                Literal(1),
+                Identifier("n")
+              )
+            ),
+            Process(
+              ExplicitFunction(
+                List(
+                  Mapping(Identifier("chan"), Identifier("c")),
+                  Mapping(
+                    Identifier("x"),
+                    FunctionApplication(
+                      Identifier("input"),
+                      List(
+                        Identifier("l")
+                      )
+                    )
+                  ),
+                  Mapping(Identifier("r"), Literal(0)),
+                  Mapping(Identifier("output"), Identifier("Initialized"))
+                )
+              ),
+              ThreadInstantiation(Identifier("L"))
+            )
+          ),
+          ThreadDefinition(
+            Identifier("L"),
+            List(
+              Identifier("chan"),
+              Identifier("x"),
+              Identifier("r"),
+              Identifier("output")
+            ),
+            ActionPrefix(
+              Assignment(
+                Identifier("r"),
+                BinaryExpression(
+                  "+",
+                  Identifier("r"),
+                  Literal(1)
+                )
+              ),
+              ConditionalThread(
+                BinaryExpression(
+                  "<=",
+                  Identifier("r"),
+                  Identifier("n")
+                ),
+                ConditionalThread(
+                  BinaryExpression(
+                    "=",
+                    Identifier("self"),
+                    Identifier("r"),
+                  ),
+                  ActionPrefix(
+                    Send(
+                      // {{ ( j \in 1..n : i # self) chan@j<< x >> }}
+                      QuantifiedMultiSet(
+                        BoundedEnumeratorWithFilter(
+                          Identifier("j"),
+                          "\\in",
+                          BinaryExpression(
+                            "..",
+                            Literal(1),
+                            Identifier("n")
+                          ),
+                          BinaryExpression(
+                            "#",
+                            Identifier("j"),
+                            Identifier("self")
+                          )
+                        ),
+                        OutgoingMessage(
+                          Identifier("chan"),
+                          Identifier("j"),
+                          Identifier("x")
+                        )
+                      )
+                    ),
+                    ThreadInstantiation(
+                      Identifier("L")
+                    )
+                  ),
+                  // chan@r?(x) . L()
+                  ActionPrefix(
+                    Receive(
+                      Identifier("chan"),
+                      Identifier("r"),
+                      Identifier("x")
+                    ),
+                    ThreadInstantiation(
+                      Identifier("L")
+                    )
+                  )
+                ),
+                ActionPrefix(
+                  Assignment(
+                    Identifier("output"),
+                    Identifier("x")
+                  ),
+                  EmptyProcess()
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  }
+
+
 }

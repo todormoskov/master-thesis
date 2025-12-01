@@ -1030,13 +1030,14 @@ class LexerTest extends AnyFunSuite {
 
   test("Recognizes the opening of an EPC spec within multi-line comments") {
     val inputSpec =
-      """(* --EPC
+      """(* --EPC foo
         | (p = 1) [[ [] <| var x. 0 ]] *)""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
         Token(TokenKind.EPC_CONTEXT_OPEN, "--EPC"),
+        Token(TokenKind.IDENTIFIER, "foo"),
         Token(TokenKind.LEFT_ROUND_BRACKET, "("),
         Token(TokenKind.IDENTIFIER, "p"),
         Token(TokenKind.EQ, "="),
@@ -1340,7 +1341,7 @@ class LexerTest extends AnyFunSuite {
 
   test("Recognizes EPC receiving a message on a channel") {
     val inputSpec =
-      """c@2(x)""".stripMargin
+      """c@2?(x)""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
@@ -1348,6 +1349,7 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.IDENTIFIER, "c"),
         Token(TokenKind.AT, "@"),
         Token(TokenKind.INTEGER, "2"),
+        Token(TokenKind.QUESTION_MARK, "?"),
         Token(TokenKind.LEFT_ROUND_BRACKET, "("),
         Token(TokenKind.IDENTIFIER, "x"),
         Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),

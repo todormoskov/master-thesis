@@ -150,7 +150,8 @@ object Lexer {
     EPC_ELSE,
     EPC_DEF,
     EPC_UNDEFINED,
-    EPC_INITIALIZED
+    EPC_INITIALIZED,
+    QUESTION_MARK
 
   case class Token(kind: TokenKind, value: String)
 
@@ -335,6 +336,10 @@ object Lexer {
         if (c == '!') {
           scanner.consume()
           return Token(TokenKind.BANG, "!")
+        }
+        if (c == '?') {
+          scanner.consume()
+          return Token(TokenKind.QUESTION_MARK, "?")
         }
         if (c == '_') {
           scanner.consume()

@@ -288,12 +288,21 @@ case class AtSign() extends Expression
 
 /**
  * EPC Specifications.
+ *
+ * EPCSpec := '--EPC' Identifier EPCSpecUnit*
+ *
  */
-case class EPCSpec() extends ModuleUnit
-
+case class EPCSpec(identifier: Identifier, specUnits: List[EPCSpecUnit]) extends ModuleUnit
+/**
+ * EPCSpecUnit := ChannelDefinition | ThreadDefinition | Network
+ */
+sealed trait EPCSpecUnit extends AST
+/**
+ * Enumerator := BoundedEnumerator | BoundedEnumeratorWithFilter
+ */
 sealed trait Enumerator
 /**
- * BoundedEnumerator := '(' Identifier ['=' | '\in'] Expression')'
+ * BoundedEnumerator := '(' Identifier ['=' | '\in'] Expression ')'
  *
  * E.g. (A = 1), (Q = "a"), (p \in 1..10), (q \in {"a", "b"}), ...
  */
@@ -309,7 +318,7 @@ case class BoundedEnumeratorWithFilter(name: Identifier, equalOrIn: String, doma
  *
  * E.g. new c
  */
-case class ChannelDefinition(identifier: Identifier) extends AST
+case class ChannelDefinition(identifier: Identifier) extends EPCSpecUnit
 /**
  * TravellingMessage := Identifier '_' '{' Literal '->' Literal '}' '<<' Expression '>>'
  *
@@ -353,15 +362,15 @@ case class Declaration(identifier: Identifier) extends Action
  */
 case class Assignment(identifier: Identifier, expression: Expression) extends Action
 /**
- * Receive := Expression '@' Expression '(' Identifier ')'
+ * Receive := Expression '@' Expression '?' '(' Identifier ')'
  *
- * e.g. c@2(x)
+ * E.g. c@2?(x)
  */
 case class Receive(channel: Expression, location: Expression, variable: Identifier) extends Action
 /**
  * Send := MultiSet(OutgoingMessage)
  *
- * e.g. {{ c@1<< ... >>,  c@2<< ... >> }}, {{ (i \in 1..2 : i # self) c@i<< ... >> }}
+ * E.g. {{ c@1<< ... >>,  c@2<< ... >> }}, {{ (i \in 1..2 : i # self) c@i<< ... >> }}
  */
 case class Send(messages: MultiSet[OutgoingMessage]) extends Action
 /**
@@ -401,9 +410,16 @@ case class ThreadInstantiation(thread: Identifier) extends Thread
  */
 case class ThreadComposition(lhs: Thread, rhs: Thread) extends Thread
 /**
+ * ThreadDefinition := 'def' Identifier [ '(' CommaList(Identifier) ')' ] ? '=' Thread
+ *
+ * E.g. def declareXAndStop = var x. 0
+ *      def assignXAndStop(x) = << x := 10 >> . 0
+ */
+case class ThreadDefinition(identifier: Identifier, freeVariables: List[Identifier], body: Thread) extends EPCSpecUnit
+/**
  * Network := Location | MessageAether | NetworkComposition
  */
-sealed trait Network extends AST
+sealed trait Network extends EPCSpecUnit
 /**
  * Process := '[[' ExplicitFunction '<|' Thread ']]'
  *
@@ -1972,8 +1988,51 @@ class Parser(lexer: Tokenizer) {
       elseExpr <- parseExpression()
     } yield IfThenElse(cond, thenExpr, elseExpr)
 
+  /*********************************************************************************************************************
+   *  EPC Specifications.
+   * ******************************************************************************************************************/
 
-  private def parseEPCSpec(): Either[String, EPCSpec] = ???
+  /**
+   * Parse an EPC specification.
+   *
+   * EPCSpec := '--EPC' Identifier EPCSpecUnit*
+   *
+   */
+  def parseEPCSpec(): Either[String, EPCSpec] =
+    for {
+      _ <- consume(TokenKind.EPC_CONTEXT_OPEN)
+      identifier <- parseIdentifier()
+      specUnits <- parseEPCSpecUnits()
+      _ <- consume(TokenKind.EPC_CONTEXT_CLOSE)
+    } yield EPCSpec(identifier, specUnits)
+
+  /**
+   * Parse a single EPC specification unit.
+   *
+   * EPCSpecUnit := ChannelDefinition | ThreadDefinition | Network
+   */
+  private def parseEPCSpecUnit(): Either[String, EPCSpecUnit] =
+    lexer.peek() match {
+      case Token(TokenKind.EPC_NEW, _) => parseChannelDefinition()
+      case Token(TokenKind.EPC_DEF, _) => parseThreadDefinition()
+      case _ => parseNetwork()
+    }
+
+  /**
+   * Parse a sequence of EPC specification units.
+   *
+   * @return A list of consumed EPC specification units.
+   */
+  private def parseEPCSpecUnits(): Either[String, List[EPCSpecUnit]] = {
+    val units = new ListBuffer[EPCSpecUnit]
+    while (!check(TokenKind.EPC_CONTEXT_CLOSE) && !check(TokenKind.EOF)) {
+      (for specUnit <- parseEPCSpecUnit() yield specUnit) match {
+        case Right(value) => units addOne value
+        case Left(value) => return Left(value)
+      }
+    }
+    Right(units.toList)
+  }
 
   /**
    * Parses an EPC enumerator.
@@ -2118,7 +2177,7 @@ class Parser(lexer: Tokenizer) {
   /**
    * Action := Declaration | Assignment | Receive | Send
    */
-  def parseAction(): Either[String, Action] =
+  private def parseAction(): Either[String, Action] =
     for {
       action <-
         if check(TokenKind.EPC_VAR)
@@ -2164,15 +2223,16 @@ class Parser(lexer: Tokenizer) {
   /**
    * Parse a "receive" action.
    *
-   * Receive := Expression '@' Expression '(' Identifier ')'
+   * Receive := Expression '@' Expression '?' '(' Identifier ')'
    *
-   * e.g. c@2(x)
+   * e.g. c@2?(x)
    */
   def parseReceive(): Either[String, Receive] =
     for {
       channel <- parseExpression()
       _ <- consume(TokenKind.AT)
       location <- parseExpression()
+        _ <- consume(TokenKind.QUESTION_MARK)
       _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
       variable <- parseIdentifier()
       _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
@@ -2200,7 +2260,7 @@ class Parser(lexer: Tokenizer) {
    *
    * Guard := EmptyProcess | ActionPrefix
    */
-  def parseGuard(): Either[String, Guard] =
+  private def parseGuard(): Either[String, Guard] =
     lexer.peek() match {
       case Token(TokenKind.INTEGER, "0") => parseEmptyProcess()
       case _ => parseActionPrefix()
@@ -2212,7 +2272,7 @@ class Parser(lexer: Tokenizer) {
    * EmptyProcess := '0'
    *
    */
-  def parseEmptyProcess(): Either[String, EmptyProcess] =
+  private def parseEmptyProcess(): Either[String, EmptyProcess] =
     lexer.peek() match {
       case Token(TokenKind.INTEGER, "0") => for _ <- consume(TokenKind.INTEGER) yield EmptyProcess()
       case _ => Left(s"Syntax error: empty process expected!")
@@ -2223,7 +2283,7 @@ class Parser(lexer: Tokenizer) {
    *
    * E.g. var x . << x := 10 >> . 0
    */
-  def parseActionPrefix(): Either[String, ActionPrefix] =
+  private def parseActionPrefix(): Either[String, ActionPrefix] =
     for {
       action <- parseAction()
       _ <- consume(TokenKind.DOT)
@@ -2321,6 +2381,27 @@ class Parser(lexer: Tokenizer) {
     } yield ThreadInstantiation(identifier)
 
   /**
+   * ThreadDefinition := 'def' Identifier [ '(' CommaList(Identifier) ')' ] ? '=' Thread
+   *
+   * E.g. def declareXAndStop = var x. 0
+   *      def assignXAndStop(x) = << x := 10 >> . 0
+   */
+  def parseThreadDefinition(): Either[String, ThreadDefinition] =
+    for {
+      _ <- consume(TokenKind.EPC_DEF)
+      identifier <- parseIdentifier()
+      freeVariables <-
+        if check(TokenKind.LEFT_ROUND_BRACKET) then for {
+          _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
+          identifiers <- parseCommaListOfIdentifiers()
+          _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
+        } yield identifiers
+        else Right(Nil)
+      _ <- consume(TokenKind.EQ)
+      body <- parseThread()
+    } yield ThreadDefinition(identifier, freeVariables, body)
+
+  /**
    * Parse a network.
    *
    * Network := Location | MessageAether | NetworkComposition
@@ -2384,7 +2465,7 @@ class Parser(lexer: Tokenizer) {
    * (p = 1) [[ [x |-> Undefined] |> var x. << x := 10 >>. 0 ]]
    * (p \in 1..10) [[ [x |-> Undefined] |> var x. << x := 10 >>. 0 ]]
    */
-  def parseLocation(): Either[String, Location] =
+  private def parseLocation(): Either[String, Location] =
     for {
       enumerator <- parseEnumerator()
       process <- parseProcess()
