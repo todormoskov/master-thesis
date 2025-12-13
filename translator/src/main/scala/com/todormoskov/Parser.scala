@@ -221,6 +221,18 @@ case class ParenthesizedExpression(expression: Expression) extends Expression
  */
 case class IfThenElse(condition: Expression, thenExpr: Expression, elseExpr: Expression) extends Expression
 /**
+ * TLA+ CASE expression.
+ *
+ * CaseExpression := 'CASE' CaseArm [ '[]' CaseArm ]* [ '[]' 'OTHER' '->' Expression ]
+ */
+case class CaseExpression(caseArms: List[CaseArm], defaultExpression: Option[Expression]) extends Expression
+/**
+ * TLA+ case arm expression.
+ *
+ * CaseArm := Expression '->' Expression
+ */
+case class CaseArm(lhs: Expression, rhs: Expression) extends AST
+/**
  * TLA+ CHOOSE expression.
  */
 case class ChooseExpression(variable: Identifier | IdentifierTuple, domain: Expression, predicate: Expression) extends Expression
@@ -374,41 +386,91 @@ case class Receive(channel: Expression, location: Expression, variable: Identifi
  */
 case class Send(messages: MultiSet[OutgoingMessage]) extends Action
 /**
- * Guard := EmptyProcess | ActionPrefix
- */
-sealed trait Guard extends Thread
-/**
- * EmptyProcess := '0'
- */
-case class EmptyProcess() extends Guard
-/**
- * ActionPrefix := Action '.' Thread
+ * ConditionalThread := 'if' Expression 'then' Thread 'else' Thread 'fi'
  *
- * E.g. var x . << x := 10 >> . 0
+ * E.g. if ... then ... else ... fi
  */
-case class ActionPrefix(action: Action, continuation: Thread) extends Guard
-/**
- * Thread := Guard | ConditionalThread | ThreadInstantiation | ThreadComposition
- */
-trait Thread extends AST
-/**
- * ConditionalThread := 'if' Expression 'then' Thread 'else' Thread
- *
- * E.g. if ... then ... else ...
- */
-case class ConditionalThread(cond: Expression, thenThread: Thread, elseThread: Thread) extends Thread
+case class ConditionalThread(cond: Expression, thenThread: Thread, elseThread: Thread) extends AST
 /**
  * ThreadInstantiation := Identifier'()'
  *
  * E.g. foo(), bar()
  */
-case class ThreadInstantiation(thread: Identifier) extends Thread
+case class ThreadInstantiation(thread: Identifier) extends AST
 /**
- * ThreadComposition := Thread | Thread
- *
- * E.g. var x . 0 | var y . 0
+ * Command := Action | ConditionalThread | ThreadInstantiation
  */
-case class ThreadComposition(lhs: Thread, rhs: Thread) extends Thread
+type Command = Action | ConditionalThread | ThreadInstantiation
+/**
+ * ThreadUnit := [Identifier ':']? Command
+ *
+ * E.g. (declareX: var x) or (assignX: << x := 10 >>)
+ */
+case class ThreadUnit(label: Option[Identifier], command: Command)
+/**
+ * Thread := Identifier ':' Command | Thread ';' Thread
+ *
+ * E.g. ( var x; << x := 10 >> ) or ( declareX: var x; assign10: << x := 10 >> )
+ */
+type Thread = List[ThreadUnit]
+/**
+ * OuterThread := ThreadComprehension | ThreadComposition
+ */
+sealed trait OuterThread extends AST
+/**
+ * ThreadComprehension := Enumerator List(Command)
+ *
+ * E.g. (j = 1) (var x; << x := 10 >>)
+ *      (j \in 1..10) (<< x := j >>)
+ */
+case class ThreadComprehension(enumerator: Enumerator, body: Thread) extends OuterThread
+/**
+ * ThreadComposition := ThreadComprehension '|' ThreadComprehension
+ *
+ * E.g. (j = 1) (<< x := j >>) | (k = 2) (<< x := k >>)
+ */
+case class ThreadComposition(lhs: OuterThread, rhs: OuterThread) extends OuterThread
+
+
+
+///**
+// * Guard := EmptyProcess | ActionPrefix
+// */
+//sealed trait Guard extends Thread
+///**
+// * EmptyProcess := '0'
+// */
+//case class EmptyProcess() extends Guard
+///**
+// * ActionPrefix := Action '.' Thread
+// *
+// * E.g. var x . << x := 10 >> . 0
+// */
+//case class ActionPrefix(action: Action, continuation: Thread) extends Guard
+///**
+// * Thread := Guard | ConditionalThread | ThreadInstantiation | ThreadComposition
+// */
+//trait Thread extends AST
+///**
+// * ConditionalThread := 'if' Expression 'then' Thread 'else' Thread
+// *
+// * E.g. if ... then ... else ...
+// */
+//case class ConditionalThread(cond: Expression, thenThread: Thread, elseThread: Thread) extends Thread
+///**
+// * ThreadInstantiation := Identifier'()'
+// *
+// * E.g. foo(), bar()
+// */
+//case class ThreadInstantiation(thread: Identifier) extends Thread
+///**
+// * ThreadComposition := Thread | Thread
+// *
+// * E.g. var x . 0 | var y . 0
+// */
+//case class ThreadComposition(lhs: Thread, rhs: Thread) extends Thread
+
+
 /**
  * ThreadDefinition := 'def' Identifier [ '(' CommaList(Identifier) ')' ] ? '=' Thread
  *
@@ -425,7 +487,7 @@ sealed trait Network extends EPCSpecUnit
  *
  * E.g. [[ [x |-> Undefined] <| var x. << x := 10 >> . 0 ]]
  */
-case class Process(memory: ExplicitFunction, body: Thread) extends AST
+case class Process(memory: ExplicitFunction, body: OuterThread) extends AST
 /**
  * LocationComprehension := Enumerator Process
  *
@@ -1358,6 +1420,8 @@ class Parser(lexer: Tokenizer) {
       then for ifThenElse <- parseIfThenElse() yield ifThenElse
     else if check(TokenKind.AT)
       then for _ <- consume(TokenKind.AT) yield AtSign()
+    else if check(TokenKind.CASE)
+      then for caseExpr <- parseCaseExpression() yield caseExpr
     else Left("Syntax Error: Expression expected!")
 
   /**
@@ -1988,6 +2052,53 @@ class Parser(lexer: Tokenizer) {
       elseExpr <- parseExpression()
     } yield IfThenElse(cond, thenExpr, elseExpr)
 
+  /**
+   * Parse an CASE expression.
+   *
+   * CaseExpression := 'CASE' CaseArm [ '[]' CaseArm ]* [ '[]' 'OTHER' '->' Expression ]
+   */
+  private def parseCaseExpression(): Either[String, CaseExpression] =
+    for {
+      _ <- consume(TokenKind.CASE)
+      firstCaseArm <- parseCaseArm()
+      tailCaseArms <- parseCaseArmSeq()
+      defaultExpr <- {
+        if check(List(TokenKind.SQUARE, TokenKind.OTHER)) then for {
+          _ <- consume(TokenKind.SQUARE)
+          _ <- consume(TokenKind.OTHER)
+          expr <- parseExpression()
+        } yield Some(expr) else Right(None)
+      }
+    } yield CaseExpression(List(firstCaseArm) ++ tailCaseArms, defaultExpr)
+
+  /**
+   * Parse a case arm AST node.
+   *
+   * CaseArm := Expression '->' Expression
+   */
+  private def parseCaseArm(): Either[String, CaseArm] = for {
+    lhs <- parseExpression()
+    _ <- consume(TokenKind.RIGHT_ARROW)
+    rhs <- parseExpression()
+  } yield CaseArm(lhs, rhs)
+
+  /**
+   * Parse a sequence of case arm AST nodes.
+   *
+   * CaseArmSeq := [ '[]' CaseArm ]*
+   */
+  private def parseCaseArmSeq(): Either[String, List[CaseArm]] = {
+    val caseArms = ListBuffer[CaseArm]()
+    while (check(TokenKind.SQUARE) && !check(List(TokenKind.SQUARE, TokenKind.OTHER))) {
+      (for caseArm <- parseCaseArm() yield caseArm) match {
+        case Right(value) => caseArms addOne value
+        case Left(value) => return Left(value)
+      }
+    }
+    Right(caseArms.toList)
+  }
+
+
   /*********************************************************************************************************************
    *  EPC Specifications.
    * ******************************************************************************************************************/
@@ -2126,6 +2237,17 @@ class Parser(lexer: Tokenizer) {
     parseCommaList[OutgoingMessage](() => parseOutgoingMessage())
 
   /**
+   * Parse an empty explicit multiset.
+   *
+   * ExplicitMultiSet := '{{' '}}'
+   */
+  private def parseEmptyExplicitMultiSet[T](): Either[String, MultiSet[T]] =
+    for {
+      _ <- consume(TokenKind.EPC_MULTISET_OPEN)
+      _ <- consume(TokenKind.EPC_MULTISET_CLOSE)
+    } yield ExplicitMultiSet(Nil)
+
+  /**
    * Parse an explicit multiset.
    *
    * ExplicitMultiSet := '{{' CommaList(Expression) '}}'
@@ -2252,119 +2374,29 @@ class Parser(lexer: Tokenizer) {
           then parseQuantifiedMultiSetOfOutgoingMessages()
         else if check(List(TokenKind.EPC_MULTISET_OPEN, TokenKind.LEFT_ROUND_BRACKET, TokenKind.IDENTIFIER, TokenKind.SET_IN))
           then parseQuantifiedMultiSetOfOutgoingMessages()
+        else if check(List(TokenKind.EPC_MULTISET_OPEN, TokenKind.EPC_MULTISET_CLOSE))
+          then parseEmptyExplicitMultiSet()
         else parseExplicitMultiSetOfOutgoingMessages()
     } yield Send(multiSet)
 
   /**
-   * Parse a guard.
+   * Parse a command.
    *
-   * Guard := EmptyProcess | ActionPrefix
+   * Command := Action | ConditionalThread | Instantiation
    */
-  private def parseGuard(): Either[String, Guard] =
-    lexer.peek() match {
-      case Token(TokenKind.INTEGER, "0") => parseEmptyProcess()
-      case _ => parseActionPrefix()
-    }
-
-  /**
-   * Parse an empty process.
-   *
-   * EmptyProcess := '0'
-   *
-   */
-  private def parseEmptyProcess(): Either[String, EmptyProcess] =
-    lexer.peek() match {
-      case Token(TokenKind.INTEGER, "0") => for _ <- consume(TokenKind.INTEGER) yield EmptyProcess()
-      case _ => Left(s"Syntax error: empty process expected!")
-    }
-
-  /**
-   * ActionPrefix := Action '.' Thread
-   *
-   * E.g. var x . << x := 10 >> . 0
-   */
-  private def parseActionPrefix(): Either[String, ActionPrefix] =
-    for {
-      action <- parseAction()
-      _ <- consume(TokenKind.DOT)
-      thread <- parseThread()
-    } yield ActionPrefix(action, thread)
-
-  /**
-   * Parse a thread.
-   *
-   * Thread := Guard | ConditionalThread | ThreadInstantiation | ThreadComposition
-   */
-  def parseThread(): Either[String, Thread] =
-    parseThreadComposition()
-
-  /**
-   * Parse a thread composition.
-   *
-   * ThreadComposition := Thread | Thread
-   *
-   * E.g. (var x . 0) | (var y . 0)
-   */
-  private def parseThreadComposition(): Either[String, Thread] =
-    for {
-      lhs <- parsePrimaryThread()
-      finalResult <- {
-        def loop(lhs: Thread): Either[String, Thread] = {
-          if check(TokenKind.EPC_THREAD_COMPOSITION) then for {
-            _ <- consume(TokenKind.EPC_THREAD_COMPOSITION)
-            rhs <- parsePrimaryThread()
-            intermediateResult <- loop(ThreadComposition(lhs, rhs))
-          } yield intermediateResult
-          else Right(lhs)
-        }
-        loop(lhs)
-      }
-    } yield finalResult
-
-  /**
-   * Parse a primary thread.
-   *
-   * PrimaryThread := Guard | ConditionalThread | ThreadInstantiation
-   *
-   */
-  private def parsePrimaryThread(): Either[String, Thread] = {
+  private def parseCommand(): Either[String, Command] =
     if check(List(TokenKind.IDENTIFIER, TokenKind.LEFT_ROUND_BRACKET, TokenKind.RIGHT_ROUND_BRACKET))
       then parseThreadInstantiation()
     else lexer.peek() match {
-      // Guards
-      case Token(TokenKind.INTEGER, "0") => parseGuard()
-      case Token(TokenKind.EPC_VAR, _) => parseGuard()
-      case Token(TokenKind.LEFT_ANGLE_BRACKET, _) => parseGuard()
-      case Token(TokenKind.IDENTIFIER, _) => parseGuard()
-      case Token(TokenKind.EPC_MULTISET_OPEN, _) => parseGuard()
+      // Actions
+      case Token(TokenKind.EPC_VAR, _) => parseAction()
+      case Token(TokenKind.LEFT_ANGLE_BRACKET, _) => parseAction()
+      case Token(TokenKind.IDENTIFIER, _) => parseAction()
+      case Token(TokenKind.EPC_MULTISET_OPEN, _) => parseAction()
       // Conditional Threads
       case Token(TokenKind.EPC_IF, _) => parseConditionalThread()
-      // Thread within parenthesis
-      case Token(TokenKind.LEFT_ROUND_BRACKET, _) => for {
-        _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
-        thread <- parseThread()
-        _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
-      } yield thread
       case _ => Left("Syntax Error: Thread expected!")
     }
-  }
-
-  /**
-   * Parse a conditional thread.
-   *
-   * ConditionalThread := 'if' Expression 'then' Thread 'else' Thread
-   *
-   * E.g. if ... then ... else ...
-   */
-  private def parseConditionalThread(): Either[String, ConditionalThread] =
-    for {
-      _ <- consume(TokenKind.EPC_IF)
-      condition <- parseExpression()
-      _ <- consume(TokenKind.EPC_THEN)
-      thenThread <- parseThread()
-      _ <- consume(TokenKind.EPC_ELSE)
-      elseThread <- parseThread()
-    } yield ConditionalThread(condition, thenThread, elseThread)
 
   /**
    * Parse a thread instantiation.
@@ -2379,6 +2411,206 @@ class Parser(lexer: Tokenizer) {
       _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
       _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
     } yield ThreadInstantiation(identifier)
+
+  /**
+   * Parse a conditional thread.
+   *
+   * ConditionalThread := 'if' Expression 'then' Thread 'else' Thread 'fi'
+   *
+   * E.g. if ... then ... else ... fi
+   */
+  private def parseConditionalThread(): Either[String, ConditionalThread] =
+    for {
+      _ <- consume(TokenKind.EPC_IF)
+      condition <- parseExpression()
+      _ <- consume(TokenKind.EPC_THEN)
+      thenThread <- parseThread()
+      _ <- consume(TokenKind.EPC_ELSE)
+      elseThread <- parseThread()
+      _ <- consume(TokenKind.EPC_FI)
+    } yield ConditionalThread(condition, thenThread, elseThread)
+
+  /**
+   * ThreadUnit := [Identifier ':']? Command
+   *
+   * E.g. (declareX: var x) or (assignX: << x := 10 >>)
+   */
+  private def parseThreadUnit(): Either[String, ThreadUnit] =
+    if check(List(TokenKind.IDENTIFIER, TokenKind.COLON)) then for {
+      identifier <- parseIdentifier()
+      _ <- consume(TokenKind.COLON)
+      command <- parseCommand()
+    } yield ThreadUnit(Some(identifier), command)
+    else for {
+      command <- parseCommand()
+    } yield ThreadUnit(None, command)
+
+  /**
+   * Set with the possible first tokens of a EPC thread unit.
+   */
+  private val threadUnitFirstSet = Set(
+    TokenKind.IDENTIFIER,
+    TokenKind.EPC_VAR,
+    TokenKind.LEFT_ANGLE_BRACKET,
+    TokenKind.EPC_MULTISET_OPEN,
+    TokenKind.EPC_IF)
+
+  /**
+   * Check if the next token is one of the possible first tokens of a thread unit.
+   */
+  private def checkThreadUnitFirstSet(): Boolean =
+    lexer.peek() match {
+      case Token(kind, value) if threadUnitFirstSet contains kind => true
+      case _ => false
+    }
+
+  /**
+   * Thread := Identifier ':' Command | Thread ';' Thread
+   *
+   * E.g. ( var x; << x := 10 >> ) or ( declareX: var x; assign10: << x := 10 >> )
+   */
+  def parseThread(): Either[String, Thread] =
+    val units = new ListBuffer[ThreadUnit]
+    while (checkThreadUnitFirstSet() || check(TokenKind.SEMICOLON)) {
+      if (check(TokenKind.SEMICOLON)) {
+        consume(TokenKind.SEMICOLON)
+      }
+      (for threadUnit <- parseThreadUnit() yield threadUnit) match {
+        case Right(value) => units addOne value
+        case Left(value) => return Left(value)
+      }
+    }
+    Right(units.toList)
+
+  /**
+   * ThreadComprehension := Enumerator List(Command)
+   *
+   * E.g. (j = 1) (var x; << x := 10 >>)
+   *      (j \in 1..10) (<< x := j >>)
+   */
+  private def parseThreadComprehension(): Either[String, ThreadComprehension] =
+    for {
+      enumerator <- parseEnumerator()
+      _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
+      thread <- parseThread()
+      _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
+    } yield ThreadComprehension(enumerator, thread)
+
+  /**
+   * ThreadComposition := ThreadComprehension '|' ThreadComprehension
+   *
+   * E.g. (j = 1) (<< x := j >>) | (k = 2) (<< x := k >>)
+   */
+  def parseThreadComposition(): Either[String, OuterThread] =
+    for {
+      lhs <- parseThreadComprehension()
+      finalResult <- {
+        def loop(lhs: OuterThread): Either[String, OuterThread] = {
+          if check(TokenKind.EPC_THREAD_COMPOSITION) then for {
+            _ <- consume(TokenKind.EPC_THREAD_COMPOSITION)
+            rhs <- parseThreadComprehension()
+            intermediateResult <- loop(ThreadComposition(lhs, rhs))
+          } yield intermediateResult
+          else Right(lhs)
+        }
+        loop(lhs)
+      }
+    } yield finalResult
+
+
+//  /**
+//   * Parse a guard.
+//   *
+//   * Guard := EmptyProcess | ActionPrefix
+//   */
+//  private def parseGuard(): Either[String, Guard] =
+//    lexer.peek() match {
+//      case Token(TokenKind.INTEGER, "0") => parseEmptyProcess()
+//      case _ => parseActionPrefix()
+//    }
+//
+//  /**
+//   * Parse an empty process.
+//   *
+//   * EmptyProcess := '0'
+//   *
+//   */
+//  private def parseEmptyProcess(): Either[String, EmptyProcess] =
+//    lexer.peek() match {
+//      case Token(TokenKind.INTEGER, "0") => for _ <- consume(TokenKind.INTEGER) yield EmptyProcess()
+//      case _ => Left(s"Syntax error: empty process expected!")
+//    }
+//
+//  /**
+//   * ActionPrefix := Action '.' Thread
+//   *
+//   * E.g. var x . << x := 10 >> . 0
+//   */
+//  private def parseActionPrefix(): Either[String, ActionPrefix] =
+//    for {
+//      action <- parseAction()
+//      _ <- consume(TokenKind.DOT)
+//      thread <- parseThread()
+//    } yield ActionPrefix(action, thread)
+//
+//  /**
+//   * Parse a thread.
+//   *
+//   * Thread := Guard | ConditionalThread | ThreadInstantiation | ThreadComposition
+//   */
+//  def parseThread(): Either[String, Thread] =
+//    parseThreadComposition()
+//
+//  /**
+//   * Parse a thread composition.
+//   *
+//   * ThreadComposition := Thread | Thread
+//   *
+//   * E.g. (var x . 0) | (var y . 0)
+//   */
+//  private def parseThreadComposition(): Either[String, Thread] =
+//    for {
+//      lhs <- parsePrimaryThread()
+//      finalResult <- {
+//        def loop(lhs: Thread): Either[String, Thread] = {
+//          if check(TokenKind.EPC_THREAD_COMPOSITION) then for {
+//            _ <- consume(TokenKind.EPC_THREAD_COMPOSITION)
+//            rhs <- parsePrimaryThread()
+//            intermediateResult <- loop(ThreadComposition(lhs, rhs))
+//          } yield intermediateResult
+//          else Right(lhs)
+//        }
+//        loop(lhs)
+//      }
+//    } yield finalResult
+//
+//  /**
+//   * Parse a primary thread.
+//   *
+//   * PrimaryThread := Guard | ConditionalThread | ThreadInstantiation
+//   *
+//   */
+//  private def parsePrimaryThread(): Either[String, Thread] = {
+//    if check(List(TokenKind.IDENTIFIER, TokenKind.LEFT_ROUND_BRACKET, TokenKind.RIGHT_ROUND_BRACKET))
+//      then parseThreadInstantiation()
+//    else lexer.peek() match {
+//      // Guards
+//      case Token(TokenKind.INTEGER, "0") => parseGuard()
+//      case Token(TokenKind.EPC_VAR, _) => parseGuard()
+//      case Token(TokenKind.LEFT_ANGLE_BRACKET, _) => parseGuard()
+//      case Token(TokenKind.IDENTIFIER, _) => parseGuard()
+//      case Token(TokenKind.EPC_MULTISET_OPEN, _) => parseGuard()
+//      // Conditional Threads
+//      case Token(TokenKind.EPC_IF, _) => parseConditionalThread()
+//      // Thread within parenthesis
+//      case Token(TokenKind.LEFT_ROUND_BRACKET, _) => for {
+//        _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
+//        thread <- parseThread()
+//        _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
+//      } yield thread
+//      case _ => Left("Syntax Error: Thread expected!")
+//    }
+//  }
 
   /**
    * ThreadDefinition := 'def' Identifier [ '(' CommaList(Identifier) ')' ] ? '=' Thread
@@ -2483,7 +2715,7 @@ class Parser(lexer: Tokenizer) {
       _ <- consume(TokenKind.EPC_LOC_SCOPE_OPEN)
       memory <- parseMemory()
       _ <- consume(TokenKind.EPC_LOC_MEMORY_CODE_SEP)
-      thread <- parseThread()
+      thread <- parseThreadComposition()
       _ <- consume(TokenKind.EPC_LOC_SCOPE_CLOSE)
     } yield Process(memory, thread)
 
@@ -2516,6 +2748,8 @@ class Parser(lexer: Tokenizer) {
           then parseQuantifiedMultiSetOfTravellingMessages()
         else if check(List(TokenKind.EPC_MULTISET_OPEN, TokenKind.LEFT_ROUND_BRACKET, TokenKind.IDENTIFIER, TokenKind.SET_IN))
           then parseQuantifiedMultiSetOfTravellingMessages()
+        else if check(List(TokenKind.EPC_MULTISET_OPEN, TokenKind.EPC_MULTISET_CLOSE))
+          then parseEmptyExplicitMultiSet()
         else parseExplicitMultiSetOfTravellingMessages()
     } yield MessageAether(multiSet)
 

@@ -1416,7 +1416,7 @@ class LexerTest extends AnyFunSuite {
 
   test("Recognizes EPC conditional threads") {
     val inputSpec =
-      """if 1 = 1 then 0 else 0""".stripMargin
+      """if 1 = 1 then 0 else 0 fi""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
@@ -1429,6 +1429,7 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.INTEGER, "0"),
         Token(TokenKind.EPC_ELSE, "else"),
         Token(TokenKind.INTEGER, "0"),
+        Token(TokenKind.EPC_FI, "fi"),
         Token(TokenKind.EOF, null)
       )
     )

@@ -1,7 +1,6 @@
 package com.todormoskov
 
 import com.todormoskov.Lexer.*
-
 import org.scalatest.funsuite.AnyFunSuite
 
 class ParserTest extends AnyFunSuite {
@@ -1755,7 +1754,7 @@ class ParserTest extends AnyFunSuite {
         |
         |THEOREM Spec => <>(x # y) \* TODO: THEOREM P == Spec => <>(x # y) should also work!
         |====
-        |INSTANCE Inner WITH y <- x \* TODO: I == INSTANCE Inner WITH y <- x should also work!
+        |I == INSTANCE Inner WITH y <- x
         | ====""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModule().toOption.get
@@ -1893,12 +1892,18 @@ class ParserTest extends AnyFunSuite {
             )
           )
         ),
-        Instance(
-          Identifier("Inner"),
-          List(
-            Substitution(
-              Identifier("y"),
-              Identifier("x")
+        ModuleDefinition(
+          NonFixLHS(
+            Identifier("I"),
+            Nil
+          ),
+          Instance(
+            Identifier("Inner"),
+            List(
+              Substitution(
+                Identifier("y"),
+                Identifier("x")
+              )
             )
           )
         )
@@ -2234,30 +2239,38 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses empty processes") {
     val inputSpec =
-      """0""".stripMargin
+      """ {{ }} """.stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
     assert(ast ==
-      EmptyProcess()
+      List(
+        ThreadUnit(
+          None,
+          Send(ExplicitMultiSet(Nil))
+        )
+      )
     )
   }
 
   test("Parses threads with declarations and assignments") {
     val inputSpec =
-      """var x . << x := 10 >> . 0""".stripMargin
+      """var x; << x := 10 >>""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
     assert(ast ==
-      ActionPrefix(
-        Declaration(
-          Identifier("x")
+      List(
+        ThreadUnit(
+          None,
+          Declaration(
+            Identifier("x")
+          )
         ),
-        ActionPrefix(
+        ThreadUnit(
+          None,
           Assignment(
             Identifier("x"),
             Literal(10)
-          ),
-          EmptyProcess()
+          )
         )
       )
     )
@@ -2265,21 +2278,24 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses threads with declarations and receive actions") {
     val inputSpec =
-      """var x . c@2?(x) . 0""".stripMargin
+      """var x; c@2?(x)""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
     assert(ast ==
-      ActionPrefix(
-        Declaration(
-          Identifier("x")
+      List(
+        ThreadUnit(
+          None,
+          Declaration(
+            Identifier("x")
+          )
         ),
-        ActionPrefix(
+        ThreadUnit(
+          None,
           Receive(
             Identifier("c"),
             Literal(2),
             Identifier("x")
-          ),
-          EmptyProcess()
+          )
         )
       )
     )
@@ -2287,51 +2303,62 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses threads with send actions") {
     val inputSpec =
-      """ {{ c@2<<"Hello">> }} . 0""".stripMargin
+      """ {{ c@2<<"Hello">> }} """.stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
     assert(ast ==
-      ActionPrefix(
-        Send(
-          ExplicitMultiSet(
-            List(
-              OutgoingMessage(
-                Identifier("c"),
-                Literal(2),
-                Literal("Hello")
+      List(
+        ThreadUnit(
+          None,
+          Send(
+            ExplicitMultiSet(
+              List(
+                OutgoingMessage(
+                  Identifier("c"),
+                  Literal(2),
+                  Literal("Hello")
+                )
               )
             )
           )
-        ),
-        EmptyProcess()
+        )
       )
     )
   }
 
   test("Parses conditional threads") {
     val inputSpec =
-      """if 1 = 1 then var x. 0 else var y. 0""".stripMargin
+      """if 1 = 1 then var x else var y fi""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
     assert(ast ==
-      ConditionalThread(
-        BinaryExpression(
-          "=",
-          Literal(1),
-          Literal(1)
-        ),
-        ActionPrefix(
-          Declaration(
-            Identifier("x")
-          ),
-          EmptyProcess()
-        ),
-        ActionPrefix(
-          Declaration(
-            Identifier("y")
-          ),
-          EmptyProcess()
-        ),
+      List(
+        ThreadUnit(
+          None,
+          ConditionalThread(
+            BinaryExpression(
+              "=",
+              Literal(1),
+              Literal(1)
+            ),
+            List(
+              ThreadUnit(
+                None,
+                Declaration(
+                  Identifier("x")
+                )
+              )
+            ),
+            List(
+              ThreadUnit(
+                None,
+                Declaration(
+                  Identifier("y")
+                )
+              )
+            )
+          )
+        )
       )
     )
   }
@@ -2342,26 +2369,33 @@ class ParserTest extends AnyFunSuite {
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
     assert(ast ==
-      ThreadInstantiation(
-        Identifier("foo")
+      List(
+        ThreadUnit(
+          None,
+          ThreadInstantiation(
+            Identifier("foo")
+          )
+        )
       )
     )
   }
 
   test("Parses thread definitions with no free variables") {
     val inputSpec =
-      """def declareXAndStop = var x. 0""".stripMargin
+      """def declareXAndStop = var x""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThreadDefinition().toOption.get
     assert(ast ==
       ThreadDefinition(
         Identifier("declareXAndStop"),
         Nil,
-        ActionPrefix(
-          Declaration(
-            Identifier("x")
-          ),
-          EmptyProcess()
+        List(
+          ThreadUnit(
+            None,
+            Declaration(
+              Identifier("x")
+            )
+          )
         )
       )
     )
@@ -2369,7 +2403,7 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses thread definitions with free variables") {
     val inputSpec =
-      """def assignXAndStop(x) = << x := 10 >> . 0""".stripMargin
+      """def assignXAndStop(x) = << x := 10 >> """.stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThreadDefinition().toOption.get
     assert(ast ==
@@ -2378,12 +2412,14 @@ class ParserTest extends AnyFunSuite {
         List(
           Identifier("x")
         ),
-        ActionPrefix(
-          Assignment(
-            Identifier("x"),
-            Literal(10)
-          ),
-          EmptyProcess()
+        List(
+          ThreadUnit(
+            None,
+            Assignment(
+              Identifier("x"),
+              Literal(10)
+            )
+          )
         )
       )
     )
@@ -2391,30 +2427,57 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses thread compositions") {
     val inputSpec =
-      """(var x. 0) | (var y. 0) | (var z . 0)""".stripMargin
+      """(j = 1) (var x) | (k = 2) (var y) | (l = 3) (var z)""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThreadComposition().toOption.get
     assert(ast ==
       ThreadComposition(
         ThreadComposition(
-          ActionPrefix(
-            Declaration(
-              Identifier("x")
+          ThreadComprehension(
+            BoundedEnumerator(
+              Identifier("j"),
+              "=",
+              Literal(1)
             ),
-            EmptyProcess()
+            List(
+              ThreadUnit(
+                None,
+                Declaration(
+                  Identifier("x")
+                )
+              )
+            )
           ),
-          ActionPrefix(
-            Declaration(
-              Identifier("y")
+          ThreadComprehension(
+            BoundedEnumerator(
+              Identifier("k"),
+              "=",
+              Literal(2)
             ),
-            EmptyProcess()
+            List(
+              ThreadUnit(
+                None,
+                Declaration(
+                  Identifier("y")
+                )
+              )
+            )
           )
         ),
-        ActionPrefix(
-          Declaration(
-            Identifier("z")
+        ThreadComprehension(
+          BoundedEnumerator(
+            Identifier("l"),
+            "=",
+            Literal(3)
           ),
-          EmptyProcess()
+          List(
+            ThreadUnit(
+              None,
+              Declaration(
+                Identifier("z")
+              )
+            )
+          )
         )
       )
     )
@@ -2422,7 +2485,7 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses processes") {
     val inputSpec =
-      """[[ [x |-> Initialized] <| << x := 10 >> . 0 ]]""".stripMargin
+      """[[ [x |-> Initialized] <| (j = 1) (<< x := 10 >>) ]]""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseProcess().toOption.get
     assert(ast ==
@@ -2435,12 +2498,21 @@ class ParserTest extends AnyFunSuite {
             )
           )
         ),
-        ActionPrefix(
-          Assignment(
-            Identifier("x"),
-            Literal(10)
+        ThreadComprehension(
+          BoundedEnumerator(
+            Identifier("j"),
+            "=",
+            Literal(1)
           ),
-          EmptyProcess()
+          List(
+            ThreadUnit(
+              None,
+              Assignment(
+                Identifier("x"),
+                Literal(10)
+              ),
+            )
+          )
         )
       )
     )
@@ -2448,7 +2520,7 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses networks with single locations") {
     val inputSpec =
-      """(p = 1) [[ [] <| 0 ]]""".stripMargin
+      """(p = 1) [[ [] <| (j = 1) ({{ }}) ]]""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseNetwork().toOption.get
     assert(ast ==
@@ -2460,7 +2532,21 @@ class ParserTest extends AnyFunSuite {
         ),
         Process(
           ExplicitFunction(Nil),
-          EmptyProcess()
+          ThreadComprehension(
+            BoundedEnumerator(
+              Identifier("j"),
+              "=",
+              Literal(1)
+            ),
+            List(
+              ThreadUnit(
+                None,
+                Send(
+                  ExplicitMultiSet(Nil)
+                )
+              )
+            )
+          )
         )
       )
     )
@@ -2468,7 +2554,7 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses networks with multiple locations") {
     val inputSpec =
-      """(p \in 1..10) [[ [] <| 0 ]]""".stripMargin
+      """(p \in 1..10) [[ [] <| (j = 1) ({{ }}) ]]""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseNetwork().toOption.get
     assert(ast ==
@@ -2484,7 +2570,21 @@ class ParserTest extends AnyFunSuite {
         ),
         Process(
           ExplicitFunction(Nil),
-          EmptyProcess()
+          ThreadComprehension(
+            BoundedEnumerator(
+              Identifier("j"),
+              "=",
+              Literal(1)
+            ),
+            List(
+              ThreadUnit(
+                None,
+                Send(
+                  ExplicitMultiSet(Nil)
+                )
+              )
+            )
+          )
         )
       )
     )
@@ -2513,7 +2613,7 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses network compositions") {
     val inputSpec =
-      """(p = 1) [[ [] <| 0 ]] || {{ c_{1 -> 2}<< "Hello" >> }}""".stripMargin
+      """(p = 1) [[ [] <| (j = 1) ({{ }}) ]] || {{ c_{1 -> 2}<< "Hello" >> }}""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseNetwork().toOption.get
     assert(ast ==
@@ -2526,7 +2626,21 @@ class ParserTest extends AnyFunSuite {
           ),
           Process(
             ExplicitFunction(Nil),
-            EmptyProcess()
+            ThreadComprehension(
+              BoundedEnumerator(
+                Identifier("j"),
+                "=",
+                Literal(1)
+              ),
+              List(
+                ThreadUnit(
+                  None,
+                  Send(
+                    ExplicitMultiSet(Nil)
+                  )
+                )
+              )
+            )
           )
         ),
         MessageAether(
@@ -2547,7 +2661,7 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses network compositions (left-associatively)") {
     val inputSpec =
-      """(p = 1) [[ [] <| 0 ]] || {{ c_{1 -> 2}<< "Hello" >> }} || (q = 2) [[ [] <| 0 ]]""".stripMargin
+      """(p = 1) [[ [] <| (j = 1) ({{ }}) ]] || {{ c_{1 -> 2}<< "Hello" >> }} || (q = 2) [[ [] <| (j = 1) ({{ }}) ]]""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseNetwork().toOption.get
     assert(ast ==
@@ -2561,7 +2675,21 @@ class ParserTest extends AnyFunSuite {
             ),
             Process(
               ExplicitFunction(Nil),
-              EmptyProcess()
+              ThreadComprehension(
+                BoundedEnumerator(
+                  Identifier("j"),
+                  "=",
+                  Literal(1)
+                ),
+                List(
+                  ThreadUnit(
+                    None,
+                    Send(
+                      ExplicitMultiSet(Nil)
+                    )
+                  )
+                )
+              )
             )
           ),
           MessageAether(
@@ -2585,7 +2713,21 @@ class ParserTest extends AnyFunSuite {
           ),
           Process(
             ExplicitFunction(Nil),
-            EmptyProcess()
+            ThreadComprehension(
+              BoundedEnumerator(
+                Identifier("j"),
+                "=",
+                Literal(1)
+              ),
+              List(
+                ThreadUnit(
+                  None,
+                  Send(
+                    ExplicitMultiSet(Nil)
+                  )
+                )
+              )
+            )
           )
         ),
       )
@@ -2594,7 +2736,7 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses network compositions with parentheses") {
     val inputSpec =
-      """(p = 1) [[ [] <| 0 ]] || ( {{ c_{1 -> 2}<< "Hello" >> }} || (q = 2) [[ [] <| 0 ]] )""".stripMargin
+      """(p = 1) [[ [] <| (j = 1) ({{ }}) ]] || ( {{ c_{1 -> 2}<< "Hello" >> }} || (q = 2) [[ [] <| (j = 1) ({{ }}) ]] )""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseNetwork().toOption.get
     assert(ast ==
@@ -2607,7 +2749,21 @@ class ParserTest extends AnyFunSuite {
           ),
           Process(
             ExplicitFunction(Nil),
-            EmptyProcess()
+            ThreadComprehension(
+              BoundedEnumerator(
+                Identifier("j"),
+                "=",
+                Literal(1)
+              ),
+              List(
+                ThreadUnit(
+                  None,
+                  Send(
+                    ExplicitMultiSet(Nil)
+                  )
+                )
+              )
+            )
           )
         ),
         NetworkComposition(
@@ -2631,7 +2787,21 @@ class ParserTest extends AnyFunSuite {
             ),
             Process(
               ExplicitFunction(Nil),
-              EmptyProcess()
+              ThreadComprehension(
+                BoundedEnumerator(
+                  Identifier("j"),
+                  "=",
+                  Literal(1)
+                ),
+                List(
+                  ThreadUnit(
+                    None,
+                    Send(
+                      ExplicitMultiSet(Nil)
+                    )
+                  )
+                )
+              )
             )
           )
         )
@@ -2641,24 +2811,28 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses EPC specifications") {
     val inputSpec =
-      """(* --EPC Consensus
+      """
+        |(* --EPC Consensus
         | new c
         |
         | (l \in 1..n) [[
         |   [ chan |-> c,
         |     x |-> input[l],
         |     r |-> 0,
-        |     output |-> Initialized ] <| L() ]]
+        |     output |-> Initialized ] <| (j = 1) ( L() ) ]]
         |
         | def L(chan, x, r, output) =
-        |   << r := r + 1>> .
+        |   << r := r + 1 >>;
         |   if r <= n
         |     then if self = r
-        |             then {{ ( j \in 1..n : j # self) chan@j<< x >> }} . L()
-        |             else chan@r?(x) . L()
-        |     else << output := x>> . 0
+        |             then {{ ( j \in 1..n : j # self) chan@j<< x >> }}; L()
+        |             else chan@r?(x); L()
+        |          fi
+        |     else << output := x>>
+        |   fi
         |
-        |*)""".stripMargin
+        |*)
+        |""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseEPCSpec().toOption.get
     assert(ast ==
@@ -2695,7 +2869,19 @@ class ParserTest extends AnyFunSuite {
                   Mapping(Identifier("output"), Identifier("Initialized"))
                 )
               ),
-              ThreadInstantiation(Identifier("L"))
+              ThreadComprehension(
+                BoundedEnumerator(
+                  Identifier("j"),
+                  "=",
+                  Literal(1)
+                ),
+                List(
+                  ThreadUnit(
+                    None,
+                    ThreadInstantiation(Identifier("L"))
+                  )
+                )
+              )
             )
           ),
           ThreadDefinition(
@@ -2706,74 +2892,100 @@ class ParserTest extends AnyFunSuite {
               Identifier("r"),
               Identifier("output")
             ),
-            ActionPrefix(
-              Assignment(
-                Identifier("r"),
-                BinaryExpression(
-                  "+",
+            List(
+              ThreadUnit(
+                None,
+                Assignment(
                   Identifier("r"),
-                  Literal(1)
+                  BinaryExpression(
+                    "+",
+                    Identifier("r"),
+                    Literal(1)
+                  )
                 )
               ),
-              ConditionalThread(
-                BinaryExpression(
-                  "<=",
-                  Identifier("r"),
-                  Identifier("n")
-                ),
+              ThreadUnit(
+                None,
                 ConditionalThread(
                   BinaryExpression(
-                    "=",
-                    Identifier("self"),
+                    "<=",
                     Identifier("r"),
+                    Identifier("n")
                   ),
-                  ActionPrefix(
-                    Send(
-                      // {{ ( j \in 1..n : i # self) chan@j<< x >> }}
-                      QuantifiedMultiSet(
-                        BoundedEnumeratorWithFilter(
-                          Identifier("j"),
-                          "\\in",
-                          BinaryExpression(
-                            "..",
-                            Literal(1),
-                            Identifier("n")
+                  List(
+                    ThreadUnit(
+                      None,
+                      ConditionalThread(
+                        BinaryExpression(
+                          "=",
+                          Identifier("self"),
+                          Identifier("r"),
+                        ),
+                        List(
+                          ThreadUnit(
+                            None,
+                            Send(
+                              // {{ ( j \in 1..n : i # self) chan@j<< x >> }}
+                              QuantifiedMultiSet(
+                                BoundedEnumeratorWithFilter(
+                                  Identifier("j"),
+                                  "\\in",
+                                  BinaryExpression(
+                                    "..",
+                                    Literal(1),
+                                    Identifier("n")
+                                  ),
+                                  BinaryExpression(
+                                    "#",
+                                    Identifier("j"),
+                                    Identifier("self")
+                                  )
+                                ),
+                                OutgoingMessage(
+                                  Identifier("chan"),
+                                  Identifier("j"),
+                                  Identifier("x")
+                                )
+                              )
+                            )
                           ),
-                          BinaryExpression(
-                            "#",
-                            Identifier("j"),
-                            Identifier("self")
+                          ThreadUnit(
+                            None,
+                            ThreadInstantiation(
+                              Identifier("L")
+                            )
                           )
                         ),
-                        OutgoingMessage(
-                          Identifier("chan"),
-                          Identifier("j"),
-                          Identifier("x")
+                        // chan@r?(x); L()
+                        List(
+                          ThreadUnit(
+                            None,
+                            Receive(
+                              Identifier("chan"),
+                              Identifier("r"),
+                              Identifier("x")
+                            )
+                          ),
+                          ThreadUnit(
+                            None,
+                            ThreadInstantiation(
+                              Identifier("L")
+                            )
+                          )
                         )
                       )
-                    ),
-                    ThreadInstantiation(
-                      Identifier("L")
                     )
                   ),
-                  // chan@r?(x) . L()
-                  ActionPrefix(
-                    Receive(
-                      Identifier("chan"),
-                      Identifier("r"),
-                      Identifier("x")
-                    ),
-                    ThreadInstantiation(
-                      Identifier("L")
+                  // << output := x >>
+                  List(
+                    ThreadUnit(
+                      None,
+                      Assignment(
+                        Identifier("output"),
+                        Identifier("x")
+                      )
                     )
                   )
-                ),
-                ActionPrefix(
-                  Assignment(
-                    Identifier("output"),
-                    Identifier("x")
-                  ),
-                  EmptyProcess()
                 )
               )
             )

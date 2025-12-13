@@ -148,10 +148,12 @@ object Lexer {
     EPC_IF,
     EPC_THEN,
     EPC_ELSE,
+    EPC_FI,
     EPC_DEF,
     EPC_UNDEFINED,
     EPC_INITIALIZED,
-    QUESTION_MARK
+    QUESTION_MARK,
+    SEMICOLON
 
   case class Token(kind: TokenKind, value: String)
 
@@ -328,6 +330,10 @@ object Lexer {
             return Token(TokenKind.EPC_ASSIGN, ":=")
           }
           return Token(TokenKind.COLON, ":")
+        }
+        if (c == ';') {
+          scanner.consume()
+          return Token(TokenKind.SEMICOLON, ";")
         }
         if (c == ',') {
           scanner.consume()
@@ -657,6 +663,7 @@ object Lexer {
             case "if" => Token(TokenKind.EPC_IF, name)
             case "then" => Token(TokenKind.EPC_THEN, name)
             case "else" => Token(TokenKind.EPC_ELSE, name)
+            case "fi" => Token(TokenKind.EPC_FI, name)
             case "def" => Token(TokenKind.EPC_DEF, name)
             // case "Undefined" => Token(TokenKind.EPC_UNDEFINED, name)
             // case "Initialized" => Token(TokenKind.EPC_INITIALIZED, name)
