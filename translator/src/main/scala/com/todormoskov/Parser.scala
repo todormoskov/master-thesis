@@ -244,6 +244,16 @@ case class BoundedQuantifiedExpression(quantifier: String, binders: List[Quantif
  * TLA+ quantified expression. E.g. \E x, y: ...; \A x, y : ...
  */
 case class QuantifiedExpression(quantifier: String, binders: List[Identifier], body: Expression) extends Expression
+/**
+ * Conjunction lists. E.g. /\ x = 10
+ *                         /\ y = 11
+ */
+case class ConjunctionList(listItems: List[Expression]) extends Expression
+/**
+ * Disjunction lists. E.g. \/ x = 10
+ *                         \/ y = 11
+ */
+case class DisjunctionList(listItems: List[Expression]) extends Expression
 
 
 /**
