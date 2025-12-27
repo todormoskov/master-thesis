@@ -296,11 +296,11 @@ case class WeakStuttering(action: Expression, state: Expression) extends Express
  */
 case class StrongStuttering(action: Expression, state: Expression) extends Expression
 /**
- * Weak fairness expression. E.g. [A]_e
+ * Weak fairness expression. E.g. WF_v(A)
  */
 case class WeakFairness(state: Expression, action: Expression) extends Expression
 /**
- * Strong stuttering node. E.g. <<A>>_e
+ * Strong stuttering node. E.g. SF_v(A)
  */
 case class StrongFairness(state: Expression, action: Expression) extends Expression
 /**

@@ -132,7 +132,7 @@ class AnalyzerTest extends AnyFunSuite {
         |     << x := 10 >>;
         |     {{ }};
         |     {{ }};
-        |     << x := 10 >>;
+        |     << x := 100 >>;
         |     {{ }};
         |     {{ }};
         |     {{ }}
@@ -158,7 +158,7 @@ class AnalyzerTest extends AnyFunSuite {
                     LeafOperation(4, None, Assignment(Identifier("x"), Literal(10))),
                     LeafOperation(5, None, Send(ExplicitMultiSet(List()))), // empty send
                     LeafOperation(6, None, Send(ExplicitMultiSet(List()))), // empty send
-                    LeafOperation(7, None, Assignment(Identifier("x"), Literal(10))),
+                    LeafOperation(7, None, Assignment(Identifier("x"), Literal(100))),
                     LeafOperation(8, None, Send(ExplicitMultiSet(List()))), // empty send
                     LeafOperation(9, None, Send(ExplicitMultiSet(List()))), // empty send
                     LeafOperation(10, None, Send(ExplicitMultiSet(List()))), // empty send
