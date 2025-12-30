@@ -447,64 +447,6 @@ class AnalyzerTest extends AnyFunSuite {
     new Parser(Tokenizer(Scanner(inputSpec))).parseModule() match {
       case Right(ast) => Analyzer.analyze(ast) match {
         case Right(epcCtx) =>
-          assert(epcCtx.thdDefinitionsToOutgoingBagMappings.size == 1)
-          assert(
-            epcCtx.thdDefinitionsToOutgoingBagMappings(Identifier("sendMessages")) ==
-              mutable.LinkedHashMap[Int, MultiSet[OutgoingMessage]]
-                // The first action (with ID = 1) of the defined thread (with the name "sendMessages") is sending these messages
-                (1 ->
-                  QuantifiedMultiSet(
-                    BoundedEnumerator(
-                      Identifier("j"),
-                      "\\in",
-                      BinaryExpression(
-                        "..",
-                        Literal(1),
-                        Identifier("N")
-                      )
-                    ),
-                    OutgoingMessage(
-                      Identifier("c"),
-                      Identifier("j"),
-                      Identifier("x")
-                    )
-                  )
-                )
-          )
-          // We expect that both (location, thread) enumerators are mapped to their outgoing bag mappings
-          assert(epcCtx.locThdEnumsToOutgoingBagMappings.size == 2)
-          // The pair ("p", "j") does not contain the messages from the first action (because it is only one).
-          // The pair ("p", "j") contains the messages from the second action (because they are more than one).
-          assert(
-            epcCtx.locThdEnumsToOutgoingBagMappings(
-              (BoundedEnumerator(Identifier("p"), "=", Literal(0)), BoundedEnumerator(Identifier("j"), "=", Literal(0)))
-            ) ==
-              mutable.LinkedHashMap[Int, MultiSet[OutgoingMessage]]
-                // The second action of the (location, thread) pair (with ID = 2) is sending these messages
-                (2 ->
-                  ExplicitMultiSet(
-                    List(
-                      OutgoingMessage(
-                        Identifier("c"),
-                        Literal(1),
-                        Literal("Hello")
-                      ),
-                      OutgoingMessage(
-                        Identifier("c"),
-                        Literal(1),
-                        Literal("Hello")
-                      )
-                    )
-                  )
-                )
-          )
-          // The pair ("q", "j") does not contain any outgoing bag mappings on its own.
-          assert(
-            epcCtx.locThdEnumsToOutgoingBagMappings(
-              (BoundedEnumerator(Identifier("q"), "\\in", BinaryExpression("..", Literal(1), Identifier("N"))), BoundedEnumerator(Identifier("j"), "=", Literal(1)))
-            ) ==
-              mutable.LinkedHashMap.empty[Int, MultiSet[OutgoingMessage]]
-          )
         case Left(value) => fail(value)
       }
       case Left(value) => fail(value)
