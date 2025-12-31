@@ -281,7 +281,7 @@ class ControlFlowAnalyzer {
           ++ computeEdges(elseOperations, regionAfterOp ++ successorRegion)
       case op@LeafOperation(id, _, ThreadInstantiation(threadName)) =>
         // Thread Instantiations has -1 as the end node and then the thread name as a label.
-        List( DiEdge(id, -1, Some(threadName.name)) )
+        List( DiEdge(id, getSuccessorIDInRegion(op, region ++ successorRegion), Some(threadName.name)) )
       case op@LeafOperation(id, _, _) => List( DiEdge(id, getSuccessorIDInRegion(op, region ++ successorRegion), None) )
     }
   }
@@ -300,9 +300,11 @@ object TLAGenerator {
     // Additionally, we create a variable for the program counters (pc) of the different locations
     // and their threads. Finally, we create variables for each channel, with the same name as the channel.
     val locationVariables = epcCtx.variablesToLocations.keys.toList
-    val pc = Identifier("pc")
     val declaredChannels = epcCtx.channels.toList
-    val allTLAVariables = locationVariables ++ List(pc) ++ declaredChannels
+    val pc = Identifier("pc")
+    val raOption = Option.when(epcCtx.thdDefinitionsToOperations.nonEmpty)(Identifier("ra"))
+    val OOption = Option.when(epcCtx.specWithMultiSends)(Identifier("O"))
+    val allTLAVariables =  List(pc) ++ raOption ++ OOption ++ locationVariables ++ declaredChannels
     val variablesDeclaration = VariableDeclaration(Token(TokenKind.VARIABLES, "VARIABLES"), allTLAVariables)
     tlaBuilder.appendUnit(variablesDeclaration, newlines = 2)
 
@@ -346,8 +348,11 @@ object TLAGenerator {
     )
     tlaBuilder.appendUnit(threadSetDefinition, newlines = 2)
 
-    OperationToTLAAction(epcCtx, tlaBuilder).generateInitPredicate()
-    OperationToTLAAction(epcCtx, tlaBuilder).translate(locationVariables, allTLAVariables)
+    val translator = OperationToTLAAction(epcCtx, tlaBuilder)
+    translator.generateInitPredicate()
+    val locationOperators = translator.translate(locationVariables, allTLAVariables)
+    val threadDefinitionOperators = translator.translateThreadDefinitions(locationVariables, allTLAVariables)
+    translator.generateRemainingSpecOperators(locationOperators, threadDefinitionOperators)
 
     tlaBuilder.getModuleUnits()
   }
@@ -426,6 +431,26 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
       )
     )
     val pcPredicate = BinaryExpression("=", Identifier("pc"), pcInitialValue)
+
+    // ra variable is a function that maps processes and its threads to lists of return addresses (initially empty)
+    val raInitialValue = Option.when(epcCtx.thdDefinitionsToOperations.nonEmpty)
+      (BinaryExpression("=", Identifier("ra"),
+        BoundedMapping(List(QuantifierBound(Identifier("self"), Identifier("ProcSet"))),
+          BoundedMapping(List(QuantifierBound(Identifier("thd"), FunctionApplication(Identifier("ThreadSet"), List(Identifier("self"))))),
+            Tuple(Nil)
+          )
+        )
+      ))
+
+    // O variable is a function that maps processes and its threads to sets of indices (initially empty)
+    val OInitialValue = Option.when(epcCtx.specWithMultiSends)
+      (BinaryExpression("=", Identifier("O"),
+        BoundedMapping(List(QuantifierBound(Identifier("self"), Identifier("ProcSet"))),
+          BoundedMapping(List(QuantifierBound(Identifier("thd"), FunctionApplication(Identifier("ThreadSet"), List(Identifier("self"))))),
+            ExplicitSet(Nil)
+          )
+        )
+      ))
 
     // Secondly, we will create state predicates for the initial state of the variables defined inside of locations.
     // Each location variable will have one corresponding TLA variable, which will contain a function
@@ -615,23 +640,15 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
       channelPredicates addOne BinaryExpression("=", channel, channelInitialValue)
     }
 
-    // O variable is a function that maps processes and its threads to sets of indices (initially empty)
-    val OInitialValue = BinaryExpression("=", Identifier("O"),
-      BoundedMapping(List(QuantifierBound(Identifier("self"), Identifier("ProcSet"))),
-        BoundedMapping(List(QuantifierBound(Identifier("thd"), FunctionApplication(Identifier("ThreadSet"), List(Identifier("self"))))),
-          ExplicitSet(Nil)
-        )
-      )
-    )
-
     // Generate the Init predicate
     val initPredicate = OperatorDefinition(
       NonFixLHS(Identifier("Init"), Nil),
       ConjunctionList(
         List(pcPredicate)
+        ++ raInitialValue
+        ++ OInitialValue
         ++ locationVariablePredicates
         ++ channelPredicates.toList
-        ++ (if (epcCtx.specWithMultiSends) then List(OInitialValue) else Nil)
       )
     )
     // Add the Init predicate to the TLA builder.
@@ -639,7 +656,7 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
     tlaBuilder.appendNewline()
   }
 
-  def translate(locationVariables: List[Identifier], tlaVariables: List[Identifier]): Unit = {
+  def translate(locationVariables: List[Identifier], tlaVariables: List[Identifier]): List[OperatorDefinition] = {
     val generatedLocationDisjunctions = mutable.ListBuffer.empty[OperatorDefinition]
     // We go over every location and start generating the actions for its threads.
     for ((locEnum, locationThreads) <- epcCtx.locationThreads) {
@@ -656,7 +673,7 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
         // Receive actions (in the case of weak accuracy) and conditional threads are translated into two TLA actions.
         for {
           (operation, idx) <- flattenedRegion.zipWithIndex
-          tlaAction <- translateOperation(locEnum, thdEnum, operation, flattenedRegion, edges, locationVariables, tlaVariables)
+          tlaAction <- translateOperation(Some(locEnum), Some(thdEnum), None, operation, flattenedRegion, edges, locationVariables, tlaVariables)
         } {
           if (idx == 0) {
             // We add a comment before the first TLA action to indicate the beginning of the actions for the current (location, thread)-pair.
@@ -674,7 +691,7 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
         if (generatedThreadActions.nonEmpty) {
           // Next, we generate the disjunction of all possible thread actions.
           // E.g. p_j(self, thd) == p_j_1A(self, thd) \/ p_j_2R(self, thd) \/ ...
-          val threadActionsDisjunctionOperator: OperatorDefinition = generateThreadActionsDisjunction(locEnum, thdEnum, generatedThreadActions)
+          val threadActionsDisjunctionOperator: OperatorDefinition = generateThreadActionsDisjunction(locEnum, thdEnum, generatedThreadActions.toList)
 
           // We add the disjunction of the thread actions to the TLA builder.
           tlaBuilder.appendUnit(threadActionsDisjunctionOperator)
@@ -695,7 +712,54 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
         generatedLocationDisjunctions.addOne(locationThreadsDisjunction)
       }
     }
+    generatedLocationDisjunctions.toList
+  }
 
+  def translateThreadDefinitions(locationVariables: List[Identifier], tlaVariables: List[Identifier]): List[OperatorDefinition] = {
+    val generatedDefinedThreadDisjunctions = mutable.ListBuffer.empty[OperatorDefinition]
+    // We go over every thread definition and start generating the TLA actions for its body.
+    for ((thdIdentifier, threadCFG) <- epcCtx.thdDefinitionsToOperations) {
+      val (region, edges) = threadCFG
+      // We flatten the region, since we no longer need the nested structure.
+      val flattenedRegion = region.flatMap(flattenOperation)
+      // Here, we will gather the generated actions for the current thread.
+      val generatedThreadActions = mutable.ListBuffer.empty[OperatorDefinition]
+      // We go over all operations and translate them into TLA actions (some operations can be translated into multiple TLA actions.)
+      // Assignments, send actions, and thread instantiations have one corresponding TLA action.
+      // Receive actions (in the case of weak accuracy) and conditional threads are translated into two TLA actions.
+      for {
+        (operation, idx) <- flattenedRegion.zipWithIndex
+        tlaAction <- translateOperation(None, None, Some(thdIdentifier), operation, flattenedRegion, edges, locationVariables, tlaVariables)
+      } {
+        if (idx == 0) {
+          // We add a comment before the first TLA action to indicate the beginning of the actions for the thread definition.
+          appendInfoComment(thdIdentifier, epcCtx.thdDefinitionsToFreeVariables(thdIdentifier))
+          tlaBuilder.appendNewline()
+        }
+        // We add the translated action to the TLA builder.
+        tlaBuilder.appendUnit(tlaAction)
+        tlaBuilder.appendNewline()
+        // And we store it locally, because we also want to generate the disjunction of all the actions for the (location, thread)-pair.
+        generatedThreadActions.addOne(tlaAction)
+      }
+
+      // If we were able to generate TLA actions for the operation, we proceed. (Empty send commands are not translated to TLA actions.)
+      if (generatedThreadActions.nonEmpty) {
+        // Next, we generate the disjunction of all possible thread actions.
+        // E.g. assignXAndStop(self, thd) == assignXAndStop_1A(self, thd) \/ assignXAndStop_2A(self, thd)
+        val threadActionsDisjunctionOperator: OperatorDefinition = generateThreadActionsDisjunction(thdIdentifier, generatedThreadActions.toList)
+
+        // We add the disjunction of the thread actions to the TLA builder.
+        tlaBuilder.appendUnit(threadActionsDisjunctionOperator)
+        tlaBuilder.appendNewline()
+        // And we store it locally, in order to generate a disjunction of all threads for the location
+        generatedDefinedThreadDisjunctions.addOne(threadActionsDisjunctionOperator)
+      }
+    }
+    generatedDefinedThreadDisjunctions.toList
+  }
+
+  def generateRemainingSpecOperators(locationDisjunctions: List[OperatorDefinition], definedThreadDisjunctions: List[OperatorDefinition]): Unit = {
     // Generate the Terminating operator
     val terminatingDefinition = OperatorDefinition(
       NonFixLHS(Identifier("Terminating"), Nil),
@@ -711,9 +775,8 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
     tlaBuilder.appendNewline()
 
     // Generate the Next action
-    val nextDefinition = OperatorDefinition(
-      NonFixLHS(Identifier("Next"), Nil),
-      foldToDisjunction(generatedLocationDisjunctions ++ List(terminatingDefinition))
+    val nextDefinition = OperatorDefinition(NonFixLHS(Identifier("Next"), Nil),
+      foldToDisjunction(locationDisjunctions ++ definedThreadDisjunctions ++ List(terminatingDefinition))
     )
     // Add the Next operator to the TLA builder.
     tlaBuilder.appendUnit(nextDefinition)
@@ -782,18 +845,34 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
     )
   }
 
-  private def generateThreadActionsDisjunction(locEnum: Enumerator, thdEnum: Enumerator, generatedTlaActions: ListBuffer[OperatorDefinition]) = {
-    val threadActionsDisjunction = foldToDisjunction(generatedTlaActions)
-    val threadActionsDisjunctionLabel = locEnum.asInstanceOf[BoundedEnumerator].name.name + "_" + thdEnum.asInstanceOf[BoundedEnumerator].name.name
-
-    val threadActionsDisjunctionOperator = OperatorDefinition(
-      NonFixLHS(Identifier(threadActionsDisjunctionLabel), List(Identifier("self"), Identifier("thd"))),
-      threadActionsDisjunction
+  /**
+   * Create a disjunction of the possible actions of a thread within a location.
+   * E.g. p_j(self, thd) == p_j_1A(self, thd) \/ p_j_2R(self, thd) \/ ...
+   */
+  private def generateThreadActionsDisjunction(locEnum: Enumerator, thdEnum: Enumerator, generatedTlaActions: List[OperatorDefinition]) =
+    OperatorDefinition(
+      NonFixLHS(Identifier(
+        locEnum.asInstanceOf[BoundedEnumerator].name.name + "_" + thdEnum.asInstanceOf[BoundedEnumerator].name.name
+      ), List(Identifier("self"), Identifier("thd"))),
+      foldToDisjunction(generatedTlaActions)
     )
-    threadActionsDisjunctionOperator
-  }
 
-  private def foldToDisjunction(operatorDefinitions: ListBuffer[OperatorDefinition]) = {
+  /**
+   * Create a disjunction of the possible actions of a defined thread.
+   * assignXAndStop == \E self \in ProcSet : \E thd \in ThreadSet[self] : assignXAndStop_1A(self, thd) \/ assignXAndStop_2A(self, thd)
+   */
+  private def generateThreadActionsDisjunction(thdIdentifier: Identifier, generatedTlaActions: List[OperatorDefinition]) =
+    OperatorDefinition(
+      NonFixLHS(Identifier(thdIdentifier.name), Nil),
+      BoundedQuantifiedExpression("\\E", List(QuantifierBound(Identifier("self"), Identifier("ProcSet"))),
+        BoundedQuantifiedExpression(
+          "\\E", List(QuantifierBound(Identifier("thd"), FunctionApplication(Identifier("ThreadSet"), List(Identifier("self"))))),
+          foldToDisjunction(generatedTlaActions)
+        )
+      )
+    )
+
+  private def foldToDisjunction(operatorDefinitions: List[OperatorDefinition]) = {
     operatorDefinitions.map(operatorDefinition =>
       IdentifierApplication(
         operatorDefinition.signature.identifier,
@@ -836,7 +915,7 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
             )
           )
         ),
-        foldToDisjunction(threadDisjunctions)
+        foldToDisjunction(threadDisjunctions.toList)
       )
     )
     // Return the new operator definition.
@@ -870,131 +949,168 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
     tlaBuilder.appendExpression(boundedThdEnum.domain)
   }
 
-  private def translateOperation(locEnum: Enumerator,
-                                 thdEnum: Enumerator,
+  /**
+   * Append a comment to the tlaBuilder to indicate the beginning of the actions of a thread definition.
+   * E.g. def assignXAndStop(x)
+   */
+  private def appendInfoComment(thdIdentifier: Identifier, freeVariables: List[Identifier]): Unit = {
+    tlaBuilder.appendString("\\* def ")
+    tlaBuilder.appendExpression(thdIdentifier)
+    tlaBuilder.appendExpressions(freeVariables, "(", ", ", ")")
+  }
+
+  private def translateOperation(locEnumOption: Option[Enumerator],
+                                 thdEnumOption: Option[Enumerator],
+                                 thdIdentifierOption: Option[Identifier],
                                  operation: Operation,
                                  flattenedRegion: Region,
                                  edges: List[DiEdge],
                                  locationVariables: List[Identifier],
                                  allTLAVariables: List[Identifier]): List[OperatorDefinition] = {
-    val currentLabel = getOperationLabel(locEnum, thdEnum, operation, getOperationSuffix(operation))
+    val currentLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, getOperationSuffix(operation))
     val successorOption = getSuccessor(operation, flattenedRegion, edges)
-    val successorLabel = getSuccessorLabel(locEnum, thdEnum, successorOption)
-    val pcEnablingCondition = generatePCEnablingCondition(locEnum, thdEnum, currentLabel)
-    val pcUpdate = generatePCUpdate(successorLabel)
+    val successorLabel = getSuccessorLabel(locEnumOption, thdEnumOption, thdIdentifierOption, successorOption)
+    val pcEnablingCondition = PCEnablingCondition(currentLabel)
+    val isThreadExit = thdIdentifierOption.isDefined && successorLabel == "Done"
+    val pcUpdateUnlessOnThreadExit = Option.unless(isThreadExit) (PCUpdate(successorLabel))
+    val pcUpdateOnThreadExit = Option.when(isThreadExit) (PCUpdateOnThreadExit())
+    val raOnThreadExit = Option.when (isThreadExit) (Identifier("ra"))
+    val raUpdateOnThreadExit = Option.when (isThreadExit) (RAUpdateOnThreadExit())
     operation match {
       case LeafOperation(id, label, command) =>
         command match {
           case Declaration(identifier) =>
             List(
-              generateTLAAction(
-                locEnum = locEnum,
-                thdEnum = thdEnum,
-                operation = operation,
-                getSuccessorOperation = () => getSuccessor(operation, flattenedRegion, edges),
-                getActionEffect = () => generateDeclarationEffect(identifier, locationVariables),
-                getUnchangedVars = () => allTLAVariables.filterNot(Set(identifier, Identifier("pc")) contains _)
-              )
+              OperatorDefinition(NonFixLHS(Identifier(currentLabel), List(Identifier("self"), Identifier("thd"))), ConjunctionList(
+                List(pcEnablingCondition)
+                ++ generateDeclarationEffect(identifier, locationVariables)
+                ++ pcUpdateUnlessOnThreadExit
+                ++ pcUpdateOnThreadExit
+                ++ raUpdateOnThreadExit
+                ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(identifier, Identifier("pc"), raOnThreadExit))))
+              ))
             )
           case Assignment(identifier, expression) =>
             List(
-              generateTLAAction(
-                locEnum = locEnum,
-                thdEnum = thdEnum,
-                operation = operation,
-                getSuccessorOperation = () => getSuccessor(operation, flattenedRegion, edges),
-                getActionEffect = () => generateAssignmentEffect(identifier, expression, locationVariables),
-                getUnchangedVars = () => allTLAVariables.filterNot(Set(identifier, Identifier("pc")) contains _)
-              )
+              OperatorDefinition(NonFixLHS(Identifier(currentLabel), List(Identifier("self"), Identifier("thd"))), ConjunctionList(
+                List(pcEnablingCondition)
+                ++ generateAssignmentEffect(identifier, expression, locationVariables)
+                ++ pcUpdateUnlessOnThreadExit
+                ++ pcUpdateOnThreadExit
+                ++ raUpdateOnThreadExit
+                ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(identifier, Identifier("pc"), raOnThreadExit))))
+              ))
             )
           case Receive(channel, location, variable) =>
             List(
-              generateTLAAction(
-                locEnum = locEnum,
-                thdEnum = thdEnum,
-                operation = operation,
-                getSuccessorOperation = () => getSuccessor(operation, flattenedRegion,edges),
-                getActionEffect = () => generateReceiveEffect(channel, location, variable, locationVariables),
-                getUnchangedVars = () => allTLAVariables.filterNot(Set(variable, Identifier("pc")) contains _)
-              )
+              OperatorDefinition(NonFixLHS(Identifier(currentLabel), List(Identifier("self"), Identifier("thd"))), ConjunctionList(
+                List(pcEnablingCondition)
+                ++ generateReceiveEffect(channel, location, variable, locationVariables)
+                ++ pcUpdateUnlessOnThreadExit
+                ++ pcUpdateOnThreadExit
+                ++ raUpdateOnThreadExit
+                ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(variable, channel, Identifier("pc"), raOnThreadExit))))
+              ))
             )
-          case Send(ExplicitMultiSet(Nil)) => Nil
+          case Send(ExplicitMultiSet(Nil)) =>
+            // Empty send commands are not translated into TLA actions.
+            Nil
           case Send(messages) =>
             List(
               OperatorDefinition(NonFixLHS(Identifier(currentLabel), List(Identifier("self"), Identifier("thd"))), ConjunctionList(
-                List(pcEnablingCondition) ++ generateSendEffect(messages, locationVariables, successorLabel) ++ List(generateUnchangedExpression(
+                List(pcEnablingCondition)
+                ++ generateSendEffect(messages, locationVariables, thdIdentifierOption, successorLabel)
+                ++ Some(UnchangedExpr(
                   messages match {
                     case ExplicitMultiSet(Nil) => allTLAVariables
-                    case ExplicitMultiSet(message :: Nil) => allTLAVariables.filterNot(Set(message.channel, Identifier("pc")) contains _)
-                    case ExplicitMultiSet(messages) => allTLAVariables.filterNot(Set(messages.head.channel, Identifier("pc"), Identifier("O")) contains _)
-                    case QuantifiedMultiSet(enumerator, message) => allTLAVariables.filterNot(Set(message.channel, Identifier("pc"), Identifier("O")) contains _)
+                    case ExplicitMultiSet(message :: Nil) =>
+                      getUnchangedVars(allTLAVariables, List(message.channel, Identifier("pc"), raOnThreadExit))
+                    case ExplicitMultiSet(messages) =>
+                      getUnchangedVars(allTLAVariables, List(messages.head.channel, Identifier("pc"), raOnThreadExit, Identifier("O")))
+                    case QuantifiedMultiSet(enumerator, message) =>
+                      getUnchangedVars(allTLAVariables, List(message.channel, Identifier("pc"), raOnThreadExit, Identifier("O")))
                   }
                 ))
               ))
             )
           case ThreadInstantiation(identifier) =>
+            // With thread instantiations, the successor label can only be determined correctly using the thread identifier.
+            val definedThreadEntryOperation = getDefinedThreadEntryOperation(epcCtx.thdDefinitionsToOperations(identifier))
+            val threadEntryOperationLabel = getSuccessorLabel(identifier, definedThreadEntryOperation)
+            val freeVariables = epcCtx.thdDefinitionsToFreeVariables(identifier)
             List(
-              generateTLAAction(
-                locEnum = locEnum,
-                thdEnum = thdEnum,
-                operation = operation,
-                getSuccessorOperation = () => getSuccessor(operation, flattenedRegion, edges),
-                getActionEffect = () => generateThreadInstantiationEffect(epcCtx.thdDefinitionsToFreeVariables(identifier), locationVariables),
-                getUnchangedVars = () => allTLAVariables.filterNot(Set(Identifier("pc")) contains _)
-              )
+              OperatorDefinition(NonFixLHS(Identifier(currentLabel), List(Identifier("self"), Identifier("thd"))), ConjunctionList(
+                List(pcEnablingCondition)
+                ++ generateThreadInstantiationEffect(freeVariables, locationVariables, successorLabel)
+                ++ Some(PCUpdate(threadEntryOperationLabel))
+                // If there is a successor in the same region, we push that successor on the "return addresses" stack.
+                ++ Option.when(successorLabel != "Done") (ThdLvlExceptUpdate(Identifier("ra"), BinaryExpression("\\o", Tuple(List(Literal(successorLabel))), ThdLvlFnAppl(Identifier("ra")))))
+                ++ Option.when(successorLabel != "Done") (UnchangedExpr(getUnchangedVars(allTLAVariables, List(Identifier("pc"), Identifier("ra")))))
+                // If there is no successor in the same region, we don't do anything with the "return addresses" stack.
+                ++ Option.when(successorLabel == "Done") (UnchangedExpr(getUnchangedVars(allTLAVariables, List(Identifier("pc")))))
+              ))
             )
-
-          case ConditionalThread(_, _, _) => Nil // this should not happen, since conditional threads are turned into IfOperations!
+          case ConditionalThread(_, _, _) =>
+            // This is only to remove the compiler warning, conditional threads are turned into IfOperations in the analysis phase.
+            Nil
         }
 
       case IfOperation(id, label, condition, thenRegion, elseRegion) =>
-        val thenActionLabel = getOperationLabel(locEnum, thdEnum, operation, "T")
-        val elseActionLabel = getOperationLabel(locEnum, thdEnum, operation, "F")
+        val thenActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, "T")
+        val elseActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, "F")
         val elseSuccessor = getSuccessorByEdgeLabel(operation, flattenedRegion, edges, "else")
         val thenSuccessor = getSuccessorByEdgeLabel(operation, flattenedRegion, edges, "then")
-        val thenSuccessorLabel = getSuccessorLabel(locEnum, thdEnum, thenSuccessor)
-        val elseSuccessorLabel = getSuccessorLabel(locEnum, thdEnum, elseSuccessor)
+        val elseSuccessorLabel = getSuccessorLabel(locEnumOption, thdEnumOption, thdIdentifierOption, elseSuccessor)
+        val thenSuccessorLabel = getSuccessorLabel(locEnumOption, thdEnumOption, thdIdentifierOption, thenSuccessor)
+        val thenPCUpdateUnlessOnThreadExit = Option.unless(isThreadExit)(PCUpdate(thenSuccessorLabel))
+        val elsePCUpdateUnlessOnThreadExit = Option.unless(isThreadExit)(PCUpdate(elseSuccessorLabel))
         List(
           OperatorDefinition(NonFixLHS(Identifier(thenActionLabel), List(Identifier("self"), Identifier("thd"))), ConjunctionList(
             List(pcEnablingCondition)
             ++ generateTruePrecondition(condition, locationVariables)
-            ++ List(generatePCUpdate(thenSuccessorLabel))
-            ++ List(generateUnchangedExpression(allTLAVariables.filter(_ != Identifier("pc"))))
+            ++ thenPCUpdateUnlessOnThreadExit
+            ++ pcUpdateOnThreadExit
+            ++ raUpdateOnThreadExit
+            ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(Identifier("pc"), raOnThreadExit))))
           )),
           OperatorDefinition(NonFixLHS(Identifier(elseActionLabel), List(Identifier("self"), Identifier("thd"))), ConjunctionList(
             List(pcEnablingCondition)
             ++ generateFalsePrecondition(condition, locationVariables)
-            ++ List(generatePCUpdate(elseSuccessorLabel))
-            ++ List(generateUnchangedExpression(allTLAVariables.filter(_ != Identifier("pc"))))
+            ++ elsePCUpdateUnlessOnThreadExit
+            ++ pcUpdateOnThreadExit
+            ++ raUpdateOnThreadExit
+            ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(Identifier("pc"), raOnThreadExit))))
           ))
         )
     }
   }
 
-  private def generateTLAAction(locEnum: Enumerator,
-                        thdEnum: Enumerator,
-                        operation: Operation,
-                        getSuccessorOperation: () => Option[Operation],
-                        getActionEffect: () => List[Expression],
-                        getUnchangedVars: () => List[Identifier]): OperatorDefinition = {
-    // Generate the labels for the current operation and the successor operation
-    val currentLabel: String = getOperationLabel(locEnum, thdEnum, operation, getOperationSuffix(operation))
-    val successorLabel: String = getSuccessorOperation() match {
-      case Some(successorOperation) => getOperationLabel(locEnum, thdEnum, successorOperation, getOperationSuffix(successorOperation))
-      case None => "Done"
+  private def getOperationSuffix(operation: Operation): String =
+    operation match {
+      case LeafOperation(id, label, command) =>
+        command match {
+          case Declaration(_) => "D"
+          case Assignment(_, _) => "A"
+          case Receive(_, _, _) => "R"
+          case Send(_) => "S"
+          case ThreadInstantiation(_) => "I"
+          case ConditionalThread(_, _, _) => "C" // this should not happen, since conditional threads are turned into IfOperations!
+        }
+      case IfOperation(id, label, condition, thenRegion, elseRegion) => "C" // "C" for conditional
     }
 
-    // Generate the pc enabling condition, the operation effect, the pc update and the unchanged variables conjuncts
-    val pcEnablingCondition = generatePCEnablingCondition(locEnum, thdEnum, currentLabel)
-    val actionEffect = getActionEffect()
-    val pcUpdate = generatePCUpdate(successorLabel)
-    val unchangedVars = generateUnchangedExpression(getUnchangedVars())
-
-    val actionConjuncts = List(pcEnablingCondition) ++ actionEffect ++ List(pcUpdate, unchangedVars)
-    // Create the new definition
-    // E.g. p_j_1D(self, thd) == /\ pc[self][thd] = "p_j_1D"
-    //                           /\ ...
-    OperatorDefinition(NonFixLHS(Identifier(currentLabel), List(Identifier("self"), Identifier("thd"))), ConjunctionList(actionConjuncts))
+  private def getOperationLabel(locEnumOption: Option[Enumerator],
+                                thdEnumOption: Option[Enumerator],
+                                threadIdentifierOption: Option[Identifier],
+                                operation: Operation,
+                                operationSuffix: String): String = {
+    if (locEnumOption.isDefined && thdEnumOption.isDefined && threadIdentifierOption.isEmpty) {
+      return getOperationLabel(locEnumOption.get, thdEnumOption.get, operation, operationSuffix)
+    }
+    if (locEnumOption.isEmpty && thdEnumOption.isEmpty && threadIdentifierOption.isDefined) {
+      return getOperationLabel(threadIdentifierOption.get, operation, operationSuffix)
+    }
+    ""
   }
 
   private def getOperationLabel(locEnum: Enumerator, thdEnum: Enumerator, operation: Operation, operationSuffix: String): String =
@@ -1016,19 +1132,18 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
       case None => "%s_%d%s" format(thdIdentifier.name, operation.id, operationSuffix)
     }
 
-  private def getOperationSuffix(operation: Operation): String =
-    operation match {
-      case LeafOperation(id, label, command) =>
-        command match {
-          case Declaration(_) => "D"
-          case Assignment(_, _) => "A"
-          case Receive(_, _, _) => "R"
-          case Send(_) => "S"
-          case ThreadInstantiation(_) => "I"
-          case ConditionalThread(_, _, _) => "C" // this should not happen, since conditional threads are turned into IfOperations!
-        }
-      case IfOperation(id, label, condition, thenRegion, elseRegion) => "C" // "C" for conditional
+  private def getSuccessorLabel(locEnumOption: Option[Enumerator],
+                                thdEnumOption: Option[Enumerator],
+                                threadIdentifierOption: Option[Identifier],
+                                successorOption: Option[Operation]): String = {
+    if (locEnumOption.isDefined && thdEnumOption.isDefined && threadIdentifierOption.isEmpty) {
+      return getSuccessorLabel(locEnumOption.get, thdEnumOption.get, successorOption)
     }
+    if (locEnumOption.isEmpty && thdEnumOption.isEmpty && threadIdentifierOption.isDefined) {
+      return getSuccessorLabel(threadIdentifierOption.get, successorOption)
+    }
+    ""
+  }
 
   private def getSuccessorLabel(locEnum: Enumerator, thdEnum: Enumerator, successorOption: Option[Operation]): String =
     successorOption match {
@@ -1036,43 +1151,61 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
       case None => "Done"
     }
 
-  private def generatePCEnablingCondition(locEnum: Enumerator, thdEnum: Enumerator, label: String): Expression =
-    // Generate the enabling condition for the program counter
-    // E.g. pc[self][thd] = "..."
-    BinaryExpression(
-      "=",
-      FunctionApplication(
-        FunctionApplication(
-          Identifier("pc"),
-          List(Identifier("self"))
-        ),
-        List(Identifier("thd"))
-      ),
-      Literal(label)
-    )
+  private def getSuccessorLabel(thdIdentifier: Identifier, successorOption: Option[Operation]): String =
+    successorOption match {
+      case Some(successorOperation) => getOperationLabel(thdIdentifier, successorOperation, getOperationSuffix(successorOperation))
+      case None => "Done"
+    }
 
-  private def generatePCUpdate(successorLabel: String): Expression = {
-    // Generate the update for the program counter.
-    // E.g. pc' = [pc EXCEPT ![self][thd] = "<successorLabel>"]
-    BinaryExpression(
-      "=",
-      PrimedExpression(Identifier("pc")),
-      ExceptExpression(
-        Identifier("pc"),
-        List(
-          ExceptClause(
-            SelectorPath(
-              List(
-                IndexSelector(List(Identifier("self"))),
-                IndexSelector(List(Identifier("thd")))
-              )
-            ),
-            Literal(successorLabel)
-          )
-        )
+  /**
+   * Generate the enabling condition for the program counter
+   * E.g. pc[self][thd] = "..."
+   */
+  private def PCEnablingCondition(label: String): Expression = BinaryExpression("=", ThdLvlFnAppl(Identifier("pc")), Literal(label))
+
+  /**
+   * Generate the update for the program counter.
+   * E.g. pc' = [pc EXCEPT ![self][thd] = "successorLabel"]
+   */
+  private def PCUpdate(successorLabel: String): Expression = ThdLvlExceptUpdate(Identifier("pc"), Literal(successorLabel))
+
+  /**
+   * Generate the update for the program counter for an exiting operation of a defined thread.
+   * E.g. pc' = [pc EXCEPT ![self][thd] = IF ra[self][thd] # << >> THEN Head(ra[self][thd]) ELSE "Done"]
+   */
+  private def PCUpdateOnThreadExit(): Expression = ThdLvlExceptUpdate(Identifier("pc"),
+    IfThenElse(
+      BinaryExpression("#", ThdLvlFnAppl(Identifier("ra")), Tuple(Nil)),
+      IdentifierApplication(Identifier("Head"), List(ThdLvlFnAppl(Identifier("ra")))),
+      Literal("Done")
+    ))
+
+  /**
+   * Conditionally generates an update that decreases the "return addresses" stack for a (location, thread)-pair.
+   * E.g. ra' = [ra EXCEPT ![self][thd] = IF ra[self][thd] # <<>>
+   *                                          THEN Tail(ra[self][thd])
+   *                                          ELSE ra[self][thd] ]
+   */
+  private def RAUpdateOnThreadExit(): Expression =
+    ThdLvlExceptUpdate(Identifier("ra"),
+      IfThenElse(
+        BinaryExpression("#", ThdLvlFnAppl(Identifier("ra")), Tuple(Nil)),
+        IdentifierApplication(Identifier("Tail"), List(ThdLvlFnAppl(Identifier("ra")))),
+        ThdLvlFnAppl(Identifier("ra"))
       )
     )
-  }
+
+  private def ThdLvlExceptUpdate(fnName: Identifier, newThdValue: Expression): Expression =
+    BinaryExpression("=",
+      PrimedExpression(fnName),
+      ExceptExpression(fnName,
+        List(ExceptClause(SelectorPath(List(IndexSelector(List(Identifier("self"))),IndexSelector(List(Identifier("thd"))))), newThdValue))
+      )
+    )
+
+  private def ThdLvlFnAppl(identifier: Identifier): Expression =
+    FunctionApplication(FunctionApplication(identifier, List(Identifier("self"))), List(Identifier("thd")))
+
 
   private def getSuccessor(operation: Operation, containingRegion: Region, edges: List[DiEdge]): Option[Operation] =
     edges.find(_.start == operation.id).flatMap(edge => getEdgeEndOperation(edge, containingRegion))
@@ -1082,27 +1215,37 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
 
   private def getEdgeEndOperation(edge: DiEdge, containingRegion: Region): Option[Operation] =
     edge match {
-      case DiEdge(start, -1, Some(threadIdentifier)) =>
-        // This is the case when we have a thread instantiation and the program counter
-        // should move from the current action to the first action of the instantiated thread.
-        // So to find the successor operation, we access the control flow graph of the defined thread,
-        // and we recursively call the function on the first one edge from its edge list (which is exactly the entry edge).
-        // Important: The operations of the thread definition are not flattened, but this is not a problem,
-        // because there is always an entry edge which contains the correct entry operation!
-        val threadCfg = epcCtx.thdDefinitionsToOperations(Identifier(threadIdentifier))
-        val threadOperations = threadCfg._1
-        val threadEdges = threadCfg._2
-        threadEdges.headOption.flatMap(entryEdge => getEdgeEndOperation(entryEdge, threadOperations))
       case DiEdge(start, -1, None) => None // there is no successor operation in this case => (label "Done")
-      case DiEdge(start, end, _) =>
-        // We simply look for the successor operation in the flattened region.
-        containingRegion.find(_.id == end)
+      case DiEdge(start, end, _) => containingRegion.find(_.id == end) // We simply look for the successor operation in the flattened region.
     }
 
-  private def generateUnchangedExpression(unchangedVariables: List[Identifier]): Expression = {
+  /**
+   * This is function can be used to determine the entry operation of a defined thread.
+   * This is useful when we have a thread instantiation and the program counter should
+   * move from the current action to the first action of the instantiated thread.
+   * In order to find the successor operation, we access the CFG of the thread, and we
+   * call the getEdgeEndOperation()-method on the first edge from its edge list (which
+   * is exactly the entry edge).
+   * Important: The operations of the thread are not flattened, but this is not a problem,
+   * because there is always an entry edge which points the correct entry operation!
+   */
+  private def getDefinedThreadEntryOperation(definedThreadCFG: CFG): Option[Operation] =
+    val threadOperations = definedThreadCFG._1
+    val threadEdges = definedThreadCFG._2
+    threadEdges.headOption.flatMap(entryEdge => getEdgeEndOperation(entryEdge, threadOperations))
+
+  private def UnchangedExpr(unchangedVariables: List[Identifier]): Expression = {
     // Generate the unchanged variables conjunct.
     // E.g. UNCHANGED << x, y, ... >>
     UnaryExpression("UNCHANGED", IdentifierTuple(unchangedVariables))
+  }
+
+  private def getUnchangedVars(variables: List[Identifier], changedVars: List[Expression | Option[Expression]]) = {
+    val changedVarsSet = changedVars.filter(_ != None).map {
+      case Some(variable) => variable
+      case variable => variable
+    }.toSet
+    variables.filterNot(variable => changedVarsSet.contains(variable))
   }
 
   private def generateDeclarationEffect(identifier: Identifier, locationVariables: List[Identifier]): List[Expression] = {
@@ -1238,7 +1381,15 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
     List(variableIsNotUndefined, messageHandlingEffect)
   }
 
-  private def generateSendEffect(messages: MultiSet[OutgoingMessage], locationVariables: List[Identifier], successorLabel: String): List[Expression] = {
+  private def generateSendEffect(messages: MultiSet[OutgoingMessage],
+                                 locationVariables: List[Identifier],
+                                 thdIdentifierOption: Option[Identifier],
+                                 successorLabel: String): List[Expression] =
+  {
+    val isThreadExit = thdIdentifierOption.isDefined && successorLabel == "Done"
+    val pcUpdateUnlessOnThreadExit = Option.unless(isThreadExit)(PCUpdate(successorLabel))
+    val pcUpdateOnThreadExit = Option.when(isThreadExit)(PCUpdateOnThreadExit())
+    val raUpdateOnThreadExit = Option.when(isThreadExit)(RAUpdateOnThreadExit())
     messages match {
       case ExplicitMultiSet(Nil) =>
         // Empty send commands are filtered before we reach this code, so we do nothing!
@@ -1246,8 +1397,11 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
       case ExplicitMultiSet(singleMsg :: Nil) =>
         // Sending a single message means that we send it directly, so we simply need to update the channel!
         val channelUpdate = generateChannelUpdateForSingleSend(singleMsg, locationVariables)
-        val pcUpdate = generatePCUpdate(successorLabel)
-        List(channelUpdate, pcUpdate)
+        val pcUpdate = PCUpdate(successorLabel)
+        List(channelUpdate)
+        ++ pcUpdateUnlessOnThreadExit
+        ++ pcUpdateOnThreadExit
+        ++ raUpdateOnThreadExit
       case ExplicitMultiSet(multipleMessages) =>
         // TODO We only allow the sending of multiple messages in a single comman on the same channel!
         // Sending multiple messages means that we also need to remember what was sent so far.
@@ -1278,14 +1432,15 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
         val allIndices = BinaryExpression("..", Literal(1), Literal(multipleMessages.size))
         val alreadySend = FunctionApplication(FunctionApplication(Identifier("O"), List(Identifier("self"))), List(Identifier("thd")))
         val remainingIndices = BinaryExpression("\\", allIndices, alreadySend)
+        val raUpdateOnThreadExitForMultiSend = Option.when(isThreadExit)(generateRAUpdateForMultiSend(indexBinder, allIndices))
         List(
-          BoundedQuantifiedExpression("\\E", List(QuantifierBound(indexBinder, remainingIndices)),
-            ConjunctionList(List(
+          BoundedQuantifiedExpression("\\E", List(QuantifierBound(indexBinder, remainingIndices)), ConjunctionList(
+            List(
               generateChannelUpdateForMultiSend(indexBinder, multipleMessages, locationVariables),
-              generateOUpdateForMultiSend(indexBinder, allIndices),
-              generatePCUpdateForMultiSend(indexBinder, allIndices, successorLabel)
-            ))
-          )
+              generatePCUpdateForMultiSend(indexBinder, allIndices, thdIdentifierOption, successorLabel))
+            ++ raUpdateOnThreadExitForMultiSend
+            ++ Some(generateOUpdateForMultiSend(indexBinder, allIndices))
+          ))
         )
       case QuantifiedMultiSet(enumerator, message) =>
         // Sending a quantified set of messages also means that we also need to remember what was sent so far.
@@ -1312,14 +1467,16 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
         }
         val alreadySend = FunctionApplication(FunctionApplication(Identifier("O"), List(Identifier("self"))), List(Identifier("thd")))
         val remainingIndices = BinaryExpression("\\", indexSet, alreadySend)
+        val raUpdateOnThreadExitForMultiSend = Option.when(isThreadExit)(generateRAUpdateForMultiSend(boundVariable, indexSet))
         List(
-          BoundedQuantifiedExpression("\\E", List(QuantifierBound(boundVariable, remainingIndices)),
-            ConjunctionList(List(
+          BoundedQuantifiedExpression("\\E", List(QuantifierBound(boundVariable, remainingIndices)), ConjunctionList(
+            List(
               generateChannelUpdateForSingleSend(message, locationVariables),
-              generateOUpdateForMultiSend(boundVariable, indexSet),
-              generatePCUpdateForMultiSend(boundVariable, indexSet, successorLabel)
-            ))
-          )
+              generatePCUpdateForMultiSend(boundVariable, indexSet, thdIdentifierOption, successorLabel),
+            )
+            ++ raUpdateOnThreadExitForMultiSend
+            ++ Some(generateOUpdateForMultiSend(boundVariable, indexSet))
+          ))
         )
     }
   }
@@ -1369,37 +1526,12 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
     )
   }
 
-  def generateOUpdateForMultiSend(binder: Identifier, domain: Expression): Expression = {
-    val O = Identifier("O")
-    BinaryExpression(
-      "=",
-      PrimedExpression(O),
-      ExceptExpression(
-        O,
-        List(
-          // EXCEPT
-          ExceptClause(
-            // ![self][thd] =
-            SelectorPath(List(IndexSelector(List(Identifier("self"))), IndexSelector(List(Identifier("thd"))))),
-            // IF @ \cup { i } # <domain>
-            IfThenElse(
-              BinaryExpression(
-                "#",
-                BinaryExpression("\\cup", AtSign(), ExplicitSet(List(binder))),
-                domain
-              ),
-              // THEN @ \cup { i }
-              BinaryExpression("\\cup", AtSign(), ExplicitSet(List(binder))),
-              // ELSE {}
-              ExplicitSet(Nil)
-            )
-          )
-        )
-      )
-    )
-  }
-
-  private def generatePCUpdateForMultiSend(binder: Identifier, domain: Expression, successorLabel: String) = {
+  private def generatePCUpdateForMultiSend(binder: Identifier,
+                                           domain: Expression,
+                                           thdIdentifierOption: Option[Identifier],
+                                           successorLabel: String) =
+  {
+    val isThreadExit = thdIdentifierOption.isDefined && successorLabel == "Done"
     val O = Identifier("O")
     val pc = Identifier("pc")
     BinaryExpression(
@@ -1412,7 +1544,7 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
           ExceptClause(
             // ![self][thd] =
             SelectorPath(List(IndexSelector(List(Identifier("self"))), IndexSelector(List(Identifier("thd"))))),
-            // IF O[self][thd] \cup { i } # <domain> THEN @ ELSE <successorLabel>
+            // IF O[self][thd] \cup { i } # <domain> THEN pc[self][thd] ELSE <successorLabel>
             IfThenElse(
               BinaryExpression(
                 "#",
@@ -1423,10 +1555,18 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
                 ),
                 domain
               ),
-              // THEN @
-              AtSign(),
+              // THEN pc[self][thd]
+              ThdLvlFnAppl(pc),
               // ELSE <successorLabel>
-              Literal(successorLabel)
+              if (isThreadExit) {
+                IfThenElse(
+                  BinaryExpression("#", ThdLvlFnAppl(Identifier("ra")), Tuple(Nil)),
+                  IdentifierApplication(Identifier("Head"), List(ThdLvlFnAppl(Identifier("ra")))),
+                  Literal("Done")
+                )
+              } else {
+                Literal(successorLabel)
+              }
             )
           )
         )
@@ -1434,34 +1574,67 @@ class OperationToTLAAction(epcCtx: EPCSpecContext, tlaBuilder: TLAStringBuilder)
     )
   }
 
-  private def generateTruePrecondition(condition: Expression, locationVariables: List[Identifier]): List[Expression] = {
-    List(
-      EPCtoTLAExpression.rewrite(condition, locationVariables)
+  /**
+   * ra' = [ra EXCEPT ![self][thd] = IF O[self][thd] \cup { i } # { ...domain }
+   *                                    THEN @
+   *                                    ELSE IF ra[thd][self]
+   *                                        THEN Tail(ra[self][thd])
+   *                                        ELSE ra[self][thd] ]
+   */
+  private def generateRAUpdateForMultiSend(binder: Identifier, domain: Expression) =
+    ThdLvlExceptUpdate(Identifier("ra"),
+      // IF O[self][thd] \cup { i } # <domain> THEN @ ELSE Tail(ra[self][thd])
+      IfThenElse(
+        BinaryExpression("#", BinaryExpression("\\cup", ThdLvlFnAppl(Identifier("O")), ExplicitSet(List(binder))), domain ),
+        ThdLvlFnAppl(Identifier("ra")),
+        IfThenElse(
+          BinaryExpression("#", ThdLvlFnAppl(Identifier("ra")), Tuple(Nil)),
+          IdentifierApplication(Identifier("Tail"), List(ThdLvlFnAppl(Identifier("ra")))),
+          ThdLvlFnAppl(Identifier("ra"))
+        )
+      )
     )
-  }
 
-  private def generateFalsePrecondition(condition: Expression, locationVariables: List[Identifier]): List[Expression] = {
-    List(
-      UnaryExpression(
-        "~",
-        ParenthesizedExpression(
-          EPCtoTLAExpression.rewrite(condition, locationVariables)
+  def generateOUpdateForMultiSend(binder: Identifier, domain: Expression): Expression = {
+    val O = Identifier("O")
+    BinaryExpression(
+      "=",
+      PrimedExpression(O),
+      ExceptExpression(
+        O,
+        List(
+          // EXCEPT
+          ExceptClause(
+            // ![self][thd] =
+            SelectorPath(List(IndexSelector(List(Identifier("self"))), IndexSelector(List(Identifier("thd"))))),
+            // IF O[self][thd] \cup { i } # <domain>
+            IfThenElse(
+              BinaryExpression(
+                "#",
+                BinaryExpression("\\cup", ThdLvlFnAppl(O), ExplicitSet(List(binder))),
+                domain
+              ),
+              // THEN O[self][thd] \cup { i }
+              BinaryExpression("\\cup", ThdLvlFnAppl(O), ExplicitSet(List(binder))),
+              // ELSE {}
+              ExplicitSet(Nil)
+            )
+          )
         )
       )
     )
   }
 
-  private def generateThreadInstantiationEffect(freeVariables: List[Identifier], locationVariables: List[Identifier]): List[Expression] = {
+  private def generateTruePrecondition(condition: Expression, locationVariables: List[Identifier]): List[Expression] =
+    List( EPCtoTLAExpression.rewrite(condition, locationVariables) )
+
+  private def generateFalsePrecondition(condition: Expression, locationVariables: List[Identifier]): List[Expression] =
+    List( UnaryExpression("~", ParenthesizedExpression( EPCtoTLAExpression.rewrite(condition, locationVariables) )) )
+
+  private def generateThreadInstantiationEffect(freeVariables: List[Identifier], locationVariables: List[Identifier], successorLabel: String): List[Expression] = {
     // We require that the free variables from the thread definition are not Undefined at the location.
     // E.g. x[self] # Undefined, y[self] # Undefined
-    for identifier <- freeVariables yield {
-      BinaryExpression(
-        "#",
-        // FunctionApplication(identifier, List(Identifier("self"))),
-        EPCtoTLAExpression.rewrite(identifier, locationVariables),
-        Identifier("Undefined")
-      )
-    }
+    for identifier <- freeVariables yield { BinaryExpression("#", EPCtoTLAExpression.rewrite(identifier, locationVariables), Identifier("Undefined")) }
   }
 }
 
@@ -1630,8 +1803,8 @@ class TLAStringBuilder {
             appendString("FALSE")
         }
       case Identifier(name) => appendString(name)
-      case IdentifierTuple(identifiers) =>
-        appendExpressions(identifiers, "<< ", ", ", " >>")
+      case IdentifierTuple(Nil) => appendString("<<>>")
+      case IdentifierTuple(identifiers) => appendExpressions(identifiers, "<< ", ", ", " >>")
       case QuantifierBound(variable, domain) =>
         val quantifier: Unit = variable match {
           case identifier: Identifier => appendExpression(identifier)
@@ -1645,8 +1818,8 @@ class TLAStringBuilder {
         appendExpression(identifier)
         appendString(" |-> ")
         appendExpression(expression)
-      case Tuple(expressions) =>
-        appendExpressions(expressions, "<< ", ", ", " >>")
+      case Tuple(Nil) => appendString("<<>>")
+      case Tuple(expressions) => appendExpressions(expressions, "<< ", ", ", " >>")
       case UnaryExpression(operator, expression) =>
         // Some unary operators look better without space after them.
         if (Set("~", "-", "[]", "<>") contains operator) {

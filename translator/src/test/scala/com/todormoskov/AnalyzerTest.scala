@@ -433,13 +433,46 @@ class AnalyzerTest extends AnyFunSuite {
         | (p = 0) [[
         |   [x |-> 0] <|
         |   (j = 0) (
-        |     {{ c@1<< "Hello" >> }};
-        |     {{ c@1<< "Hello" >>, c@1<< "Hello" >> }};
         |     sendMessages()
         |   )
         | ]]
         | || (q \in 1..N) [[ [] <| (j = 1) ( {{ }} ) ]]
         |
+        | *)
+        | ====
+        |""".stripMargin
+
+    new Parser(Tokenizer(Scanner(inputSpec))).parseModule() match {
+      case Right(ast) => Analyzer.analyze(ast) match {
+        case Right(epcCtx) =>
+        case Left(value) => fail(value)
+      }
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Random test") {
+    val inputSpec =
+      """
+        | ---- MODULE TlaModuleWithEPCSpec ----
+        |EXTENDS Integers, Sequences, Bags
+        |
+        |(* --EPC HelloWorld
+        | new c
+        |
+        | (p = 1) [[
+        |    [x |-> "Hello World"] <|
+        |    (j = 1) (
+        |        {{ c@2<<x>> }}
+        |    )
+        | ]]
+        | ||
+        | (q = 2) [[
+        |    [y |-> ""] <|
+        |    (j = 1) (
+        |        c@1?(y)
+        |    )
+        | ]]
         | *)
         | ====
         |""".stripMargin
