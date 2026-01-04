@@ -2838,6 +2838,7 @@ class ParserTest extends AnyFunSuite {
     assert(ast ==
       EPCSpec(
         Identifier("Consensus"),
+        Nil,
         List(
           ChannelDefinition(
             Identifier("c")

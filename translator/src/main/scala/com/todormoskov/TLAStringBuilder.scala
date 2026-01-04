@@ -251,7 +251,7 @@ class TLAStringBuilder {
           appendExpression(expression)
         })
       case ExplicitSet(values) =>
-        if values == Nil then appendString("{ }") else appendExpressions(values, "{", ", ", "}")
+        if values == Nil then appendString("{}") else appendExpressions(values, "{", ", ", "}")
       case BoundedSetComprehension(variable, domain, predicate) =>
         appendString("{")
         appendExpression(variable)

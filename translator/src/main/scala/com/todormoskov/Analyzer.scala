@@ -4,7 +4,7 @@ import com.todormoskov
 import com.todormoskov.Lexer.*
 
 import scala.annotation.tailrec
-import scala.collection.mutable
+import scala.collection.{immutable, mutable}
 import scala.collection.mutable.ListBuffer
 
 sealed trait Operation {
@@ -31,7 +31,14 @@ case class EPCSpecContext(
   messageAether: mutable.ListBuffer[MultiSet[TravellingMessage]],
   variablesToLocations: mutable.LinkedHashMap[Identifier, mutable.ListBuffer[Enumerator]],
   specWithMultiSends: Boolean,
-)
+  modifiers: immutable.Set[String]
+) {
+  val failStopConfigured: Boolean = modifiers.contains("FailStop")
+  val weakAccuracyConfigured: Boolean = modifiers.contains("WeakAccuracy")
+  val terminatingConfigured: Boolean = modifiers.contains("Terminating")
+  val terminationConfigured: Boolean = modifiers.contains("Termination")
+  val nextWFConfigured: Boolean = modifiers.contains("NextWF")
+}
 
 object Analyzer {
   def analyze(tlaModule: Module): Either[String, EPCSpecContext] = {
@@ -128,7 +135,9 @@ object Analyzer {
 
       // Start the recursive visit of all EPC spec units.
       // This gathers information about the defined channels, locations (with their variables and their threads), and the defined threads.
-      tlaModule.moduleUnits(epcSpecIndex).asInstanceOf[EPCSpec].specUnits.foreach(visitEPCSpecUnit)
+      val epcSpec = tlaModule.moduleUnits(epcSpecIndex).asInstanceOf[EPCSpec]
+      val modifiers = epcSpec.modifiers.map(_.name).toSet
+      epcSpec.specUnits.foreach(visitEPCSpecUnit)
 
       // We compute which EPC variables appear in which locations. This will be used in the definition of the
       // initial state predicate, where we need to specify the initial state of all TLA variables.
@@ -172,7 +181,8 @@ object Analyzer {
         threadDefinitionsAsOperations,
         messageAether,
         variablesToLocations,
-        specWithMultiSends
+        specWithMultiSends,
+        modifiers
       ))
     }
   }

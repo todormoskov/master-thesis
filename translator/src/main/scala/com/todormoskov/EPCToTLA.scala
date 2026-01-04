@@ -8,10 +8,18 @@ import scala.collection.mutable.ListBuffer
 class EPCToTLA(epcCtx: EPCSpecContext) {
   private val tlaStringBuilder = new TLAStringBuilder
 
+  private val UNDEFINED = "Undefined"
+  private val INITIALIZED = "Initialized"
+  private val PC = "pc"
+  private val RA = "ra"
+  private val O = "O"
+  private val FAILED_SET = "F"
+  private val TRUSTED_IMMORTAL = "trim"
+
   def translateSpec(): TLAStringBuilder = {
     // We add the constants Undefined and Initialized.
     val constants = ConstantDeclaration(Token(TokenKind.CONSTANTS, "CONSTANTS", -1, -1),
-      List(OperatorDeclaration(Identifier("Undefined"), Nil), OperatorDeclaration(Identifier("Initialized"), Nil)))
+      List(OperatorDeclaration(Identifier(UNDEFINED), Nil), OperatorDeclaration(Identifier(INITIALIZED), Nil)))
     tlaStringBuilder.appendUnit(constants, newlines = 2)
 
     // We generate the variable declarations. This includes the declaration of all variables
@@ -20,10 +28,12 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     // and their threads. Finally, we create variables for each channel, with the same name as the channel.
     val locationVariables = epcCtx.variablesToLocations.keys.toList
     val declaredChannels = epcCtx.channels.toList
-    val pc = Identifier("pc")
-    val raOption = Option.when(epcCtx.thdDefinitionsToOperations.nonEmpty)(Identifier("ra"))
-    val OOption = Option.when(epcCtx.specWithMultiSends)(Identifier("O"))
-    val allTLAVariables =  List(pc) ++ raOption ++ OOption ++ locationVariables ++ declaredChannels
+    val pc = Identifier(PC)
+    val raOption = Option.when(epcCtx.thdDefinitionsToOperations.nonEmpty)(Identifier(RA))
+    val OOption = Option.when(epcCtx.specWithMultiSends)(Identifier(O))
+    val FailedOption = Option.when(epcCtx.failStopConfigured) (Identifier(FAILED_SET))
+    val TrImOption = Option.when(epcCtx.weakAccuracyConfigured) (Identifier(TRUSTED_IMMORTAL))
+    val allTLAVariables =  List(pc) ++ raOption ++ OOption ++ FailedOption ++ TrImOption ++ locationVariables ++ declaredChannels
     val variablesDeclaration = VariableDeclaration(Token(TokenKind.VARIABLES, "VARIABLES", -1, -1), allTLAVariables)
     tlaStringBuilder.appendUnit(variablesDeclaration, newlines = 2)
 
@@ -70,7 +80,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     translateInitialState()
     val locationOperators = translateLocations(locationVariables, allTLAVariables)
     val threadDefinitionOperators = translateThreadDefinitions(locationVariables, allTLAVariables)
-    generateRemainingSpecOperators(locationOperators, threadDefinitionOperators)
+    generateRemainingSpecOperators(allTLAVariables, locationOperators, threadDefinitionOperators)
 
     tlaStringBuilder
   }
@@ -166,6 +176,9 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           )
         )
       ))
+
+    val FInitialValue = Option.when(epcCtx.failStopConfigured)(BinaryExpression("=", Identifier(FAILED_SET), ExplicitSet(Nil)))
+    val TrImInitialValue = Option.when(epcCtx.weakAccuracyConfigured)(BinaryExpression("\\in", Identifier(TRUSTED_IMMORTAL), Identifier("ProcSet")))
 
     // Secondly, we will create state predicates for the initial state of the variables defined inside of locations.
     // Each location variable will have one corresponding TLA variable, which will contain a function
@@ -362,6 +375,8 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         List(pcPredicate)
           ++ raInitialValue
           ++ OInitialValue
+          ++ FInitialValue
+          ++ TrImInitialValue
           ++ locationVariablePredicates
           ++ channelPredicates.toList
       )
@@ -387,10 +402,10 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         // Assignments, send actions, and thread instantiations have one corresponding TLA action.
         // Receive actions (in the case of weak accuracy) and conditional threads are translated into two TLA actions.
         for {
-          (operation, idx) <- flattenedRegion.zipWithIndex
-          tlaAction <- translateOperation(Some(locEnum), Some(thdEnum), None, operation, flattenedRegion, edges, locationVariables, tlaVariables)
+          (operation, operationIdx) <- flattenedRegion.zipWithIndex
+          (tlaAction, tlaActionIdx) <- translateOperation(Some(locEnum), Some(thdEnum), None, operation, flattenedRegion, edges, locationVariables, tlaVariables).zipWithIndex
         } {
-          if (idx == 0) {
+          if (operationIdx == 0 && tlaActionIdx == 0) {
             // We add a comment before the first TLA action to indicate the beginning of the actions for the current (location, thread)-pair.
             appendInfoComment(locEnum, thdEnum)
             tlaStringBuilder.appendNewline()
@@ -443,10 +458,10 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       // Assignments, send actions, and thread instantiations have one corresponding TLA action.
       // Receive actions (in the case of weak accuracy) and conditional threads are translated into two TLA actions.
       for {
-        (operation, idx) <- flattenedRegion.zipWithIndex
-        tlaAction <- translateOperation(None, None, Some(thdIdentifier), operation, flattenedRegion, edges, locationVariables, tlaVariables)
+        (operation, operationIdx) <- flattenedRegion.zipWithIndex
+        (tlaAction, tlaActionIdx) <- translateOperation(None, None, Some(thdIdentifier), operation, flattenedRegion, edges, locationVariables, tlaVariables).zipWithIndex
       } {
-        if (idx == 0) {
+        if (operationIdx == 0 && tlaActionIdx == 0) {
           // We add a comment before the first TLA action to indicate the beginning of the actions for the thread definition.
           appendInfoComment(thdIdentifier, epcCtx.thdDefinitionsToFreeVariables(thdIdentifier))
           tlaStringBuilder.appendNewline()
@@ -474,9 +489,24 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     generatedDefinedThreadDisjunctions.toList
   }
 
-  def generateRemainingSpecOperators(locationDisjunctions: List[OperatorDefinition], definedThreadDisjunctions: List[OperatorDefinition]): Unit = {
+  def generateRemainingSpecOperators(tlaVariables: List[Identifier], locationDisjunctions: List[OperatorDefinition], definedThreadDisjunctions: List[OperatorDefinition]): Unit = {
+    // Optionally generate the Fail operator
+    val failOption = Option.when (epcCtx.failStopConfigured) (OperatorDefinition(
+      NonFixLHS(Identifier("Fail"), Nil),
+      BoundedQuantifiedExpression("\\E", List(QuantifierBound(Identifier("self"), Identifier("ProcSet"))), ConjunctionList(Nil
+        ++ Option.when(epcCtx.weakAccuracyConfigured)(BinaryExpression("#", Identifier("self"), Identifier(TRUSTED_IMMORTAL)))
+        ++ Some(BinaryExpression("=", PrimedExpression(Identifier(FAILED_SET)), BinaryExpression("\\cup", Identifier(FAILED_SET), ExplicitSet(List(Identifier("self"))))))
+        ++ Some(UnchangedExpr(getUnchangedVars(tlaVariables, List(Identifier(FAILED_SET)))))
+      ))
+    ))
+    // Add the Fail operator to the TLA builder.
+    failOption.foreach(failDefinition =>
+      tlaStringBuilder.appendUnit(failDefinition)
+      tlaStringBuilder.appendNewline()
+    )
+
     // Generate the Terminating operator
-    val terminatingDefinition = OperatorDefinition(
+    val terminatingOption = Option.when (epcCtx.terminatingConfigured) (OperatorDefinition(
       NonFixLHS(Identifier("Terminating"), Nil),
       ConjunctionList(
         List(
@@ -484,14 +514,16 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           UnaryExpression("UNCHANGED", Identifier("vars"))
         )
       )
+    ))
+    terminatingOption.foreach(terminatingDefinition =>
+      // Add the Terminating operator to the TLA builder.
+      tlaStringBuilder.appendUnit(terminatingDefinition)
+      tlaStringBuilder.appendNewline()
     )
-    // Add the Terminating operator to the TLA builder.
-    tlaStringBuilder.appendUnit(terminatingDefinition)
-    tlaStringBuilder.appendNewline()
 
     // Generate the Next action
     val nextDefinition = OperatorDefinition(NonFixLHS(Identifier("Next"), Nil),
-      foldToDisjunction(locationDisjunctions ++ definedThreadDisjunctions ++ List(terminatingDefinition))
+      foldToDisjunction(locationDisjunctions ++ definedThreadDisjunctions ++ failOption ++ terminatingOption)
     )
     // Add the Next operator to the TLA builder.
     tlaStringBuilder.appendUnit(nextDefinition)
@@ -500,30 +532,27 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     // Generate the specification Spec
     val specDefinition = OperatorDefinition(
       NonFixLHS(Identifier("Spec"), Nil),
-      BinaryExpression(
-        "/\\",
-        Identifier("Init"),
-        UnaryExpression(
-          "[]",
-          WeakStuttering(
-            Identifier("Next"),
-            Identifier("vars")
-          )
+      if (!epcCtx.nextWFConfigured)
+        then BinaryExpression("/\\", Identifier("Init"), UnaryExpression("[]", WeakStuttering(Identifier("Next"), Identifier("vars"))))
+        else BinaryExpression("/\\",
+          BinaryExpression("/\\", Identifier("Init"), UnaryExpression("[]", WeakStuttering(Identifier("Next"), Identifier("vars")))),
+          WeakFairness(Identifier("vars"), Identifier("Next"))
         )
-      )
     )
     // Add the Spec operator to the TLA builder.
     tlaStringBuilder.appendUnit(specDefinition)
     tlaStringBuilder.appendNewline()
 
     // Generate the Termination definition
-    val terminationDefinition = OperatorDefinition(
+    val terminationOption = Option.when (epcCtx.terminationConfigured) (OperatorDefinition(
       NonFixLHS(Identifier("Termination"), Nil),
       UnaryExpression("<>", ParenthesizedExpression(generateTerminationPredicate()))
+    ))
+    terminationOption.foreach(terminationDefinition =>
+      // Add the Terminating operator to the TLA builder.
+      tlaStringBuilder.appendUnit(terminationDefinition)
+      tlaStringBuilder.appendNewline()
     )
-    // Add the Terminating operator to the TLA builder.
-    tlaStringBuilder.appendUnit(terminationDefinition)
-    tlaStringBuilder.appendNewline()
   }
 
   /**
@@ -612,24 +641,16 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       List(
         QuantifierBound(
           Identifier("self"),
-          if (locEnum.asInstanceOf[BoundedEnumerator].equalOrIn == "=")
-          then ExplicitSet(List(locEnum.asInstanceOf[BoundedEnumerator].domain))
-          else locEnum.asInstanceOf[BoundedEnumerator].domain
+          {
+            val domain = if (locEnum.asInstanceOf[BoundedEnumerator].equalOrIn == "=")
+              then ExplicitSet(List(locEnum.asInstanceOf[BoundedEnumerator].domain))
+              else locEnum.asInstanceOf[BoundedEnumerator].domain
+            if (epcCtx.failStopConfigured) then BinaryExpression("\\", domain, Identifier(FAILED_SET)) else domain
+          }
         )
       ),
       BoundedQuantifiedExpression(
-        "\\E",
-        List(
-          QuantifierBound(
-            Identifier("thd"),
-            FunctionApplication(
-              Identifier("ThreadSet"),
-              List(
-                Identifier("self")
-              )
-            )
-          )
-        ),
+        "\\E", List(QuantifierBound(Identifier("thd"), FunctionApplication(Identifier("ThreadSet"), List(Identifier("self"))))),
         foldToDisjunction(threadDisjunctions.toList)
       )
     )
@@ -727,6 +748,17 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
                   ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(variable, channel, Identifier("pc"), raOnThreadExit))))
               ))
             )
+            ++ Option.when(epcCtx.weakAccuracyConfigured) ({
+              val suspectActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, "Susp")
+              OperatorDefinition(NonFixLHS(Identifier(suspectActionLabel), List(Identifier("self"), Identifier("thd"))), ConjunctionList(
+                List(pcEnablingCondition)
+                  ++ generateSuspectEffect(location, locationVariables)
+                  ++ pcUpdateUnlessOnThreadExit
+                  ++ pcUpdateOnThreadExit
+                  ++ raUpdateOnThreadExit
+                  ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(Identifier("pc"), raOnThreadExit))))
+              ))
+            })
           case Send(ExplicitMultiSet(Nil)) =>
             // Empty send commands are not translated into TLA actions.
             Nil
@@ -1018,14 +1050,12 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   }
 
   private def generateReceiveEffect(channel: Expression, locationExpr: Expression, variable: Identifier, locationVariables: List[Identifier]): List[Expression] = {
-    // We require that the variable in the "receive" action is not Undefined at the location.
-    // E.g. x[self] # Undefined
-    val variableIsNotUndefined = BinaryExpression(
-      "#",
-      // FunctionApplication(variable, List(Identifier("self"))),
-      EPCtoTLAExpression.rewrite(variable, locationVariables),
-      Identifier("Undefined")
-    )
+    val sourceExpr = EPCtoTLAExpression.rewrite(locationExpr, locationVariables)
+    val variableExpr = EPCtoTLAExpression.rewrite(variable, locationVariables)
+    // We require that the location expression can be evaluation to a valid location (is element of ProcSet).
+    val sourceExprIsInProcSet = BinaryExpression("\\in", sourceExpr, Identifier("ProcSet"))
+    // We require that the variable in the "receive" action is not Undefined at the location. E.g. x[self] # Undefined.
+    val variableIsNotUndefined = BinaryExpression("#", variableExpr, Identifier("Undefined"))
     // Another precondition is that there is a message in the given channel
     // \E msg \in DOMAIN (channel)
     val messageHandlingEffect = BoundedQuantifiedExpression(
@@ -1093,7 +1123,17 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         )
       )
     )
-    List(variableIsNotUndefined, messageHandlingEffect)
+    List(sourceExprIsInProcSet, variableIsNotUndefined, messageHandlingEffect)
+  }
+
+  private def generateSuspectEffect(location: Expression, locationVariables: List[Identifier]): List[Expression] = {
+    val sourceExpr = EPCtoTLAExpression.rewrite(location, locationVariables)
+    // We require that the source location in the "receive" action is a process.
+    // E.g. <location-expression> \in ProcSet
+    val sourceIsInProcSet = BinaryExpression("\\in", sourceExpr, Identifier("ProcSet"))
+    // And that it is not the trusted immortal
+    val sourceIsNotTrustedImmortal = BinaryExpression("#", sourceExpr, Identifier(TRUSTED_IMMORTAL))
+    List(sourceIsInProcSet, sourceIsNotTrustedImmortal)
   }
 
   private def generateSendEffect(messages: MultiSet[OutgoingMessage],
@@ -1227,10 +1267,12 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
             BinaryExpression("=", indexBinder, Literal(idx + 1)),
             BinaryExpression("(+)", multipleMessages.head.channel,
               IdentifierApplication(Identifier("SetToBag"), List(
-                Tuple(List(
-                  Identifier("self"),
-                  EPCtoTLAExpression.rewrite(message.target, locationVariables),
-                  EPCtoTLAExpression.rewrite(message.value, locationVariables)
+                ExplicitSet(List(
+                  Tuple(List(
+                    Identifier("self"),
+                    EPCtoTLAExpression.rewrite(message.target, locationVariables),
+                    EPCtoTLAExpression.rewrite(message.value, locationVariables)
+                  ))
                 ))
               ))
             )

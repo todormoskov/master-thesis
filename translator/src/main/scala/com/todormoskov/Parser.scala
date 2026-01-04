@@ -311,10 +311,10 @@ case class AtSign() extends Expression
 /**
  * EPC Specifications.
  *
- * EPCSpec := '--EPC' Identifier EPCSpecUnit*
+ * EPCSpec := '--EPC' [ '(' CommaList(Identifier) ')' ]? Identifier EPCSpecUnit*
  *
  */
-case class EPCSpec(identifier: Identifier, specUnits: List[EPCSpecUnit]) extends ModuleUnit
+case class EPCSpec(identifier: Identifier, modifiers: List[Identifier], specUnits: List[EPCSpecUnit]) extends ModuleUnit
 /**
  * EPCSpecUnit := ChannelDefinition | ThreadDefinition | Network
  */
@@ -2088,16 +2088,22 @@ class Parser(lexer: Tokenizer) {
   /**
    * Parse an EPC specification.
    *
-   * EPCSpec := '--EPC' Identifier EPCSpecUnit*
+   * EPCSpec := '--EPC' [ '(' CommaList(Identifier) ')' ]? Identifier EPCSpecUnit*
    *
    */
   def parseEPCSpec(): Either[String, EPCSpec] =
     for {
       _ <- consume(TokenKind.EPC_CONTEXT_OPEN)
+      modifiers <- if (check(TokenKind.LEFT_ROUND_BRACKET)) then for {
+          _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
+          modifiers <- parseCommaListOfIdentifiers()
+          _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
+        } yield modifiers
+        else Right(Nil)
       identifier <- parseIdentifier()
       specUnits <- parseEPCSpecUnits()
       _ <- consume(TokenKind.EPC_CONTEXT_CLOSE)
-    } yield EPCSpec(identifier, specUnits)
+    } yield EPCSpec(identifier, modifiers, specUnits)
 
   /**
    * Parse a single EPC specification unit.
