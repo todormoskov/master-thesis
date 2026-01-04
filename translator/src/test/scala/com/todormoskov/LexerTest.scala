@@ -10,7 +10,7 @@ class LexerTest extends AnyFunSuite {
   private def recognizeTokens(input: String): List[Token] = {
     val tokenizer = Tokenizer(Scanner(input))
     val tokens = ListBuffer[Token]()
-    while (tokenizer.peek() != Token(TokenKind.EOF, null)) {
+    while (tokenizer.peek().asInstanceOf[Token].kind != TokenKind.EOF) {
       tokens.addOne(tokenizer.consume())
     }
     tokens.addOne(tokenizer.consume())
@@ -28,13 +28,13 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.MINUS_SEPARATOR, "----"),
-        Token(TokenKind.MODULE, "MODULE"),
-        Token(TokenKind.IDENTIFIER, "M"),
-        Token(TokenKind.MINUS_SEPARATOR, "----"),
-        Token(TokenKind.MINUS_SEPARATOR, "----"),
-        Token(TokenKind.EQUAL_SEPARATOR, "===="),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.MINUS_SEPARATOR, "----", 1, 1),
+        Token(TokenKind.MODULE, "MODULE", 1 , 6),
+        Token(TokenKind.IDENTIFIER, "M", 1, 13),
+        Token(TokenKind.MINUS_SEPARATOR, "----", 1, 15),
+        Token(TokenKind.MINUS_SEPARATOR, "----", 2, 1),
+        Token(TokenKind.EQUAL_SEPARATOR, "====", 3, 1),
+        Token(TokenKind.EOF, null, 4, 1)
       )
     )
   }
@@ -46,13 +46,13 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.CONSTANTS, "CONSTANTS"),
-        Token(TokenKind.IDENTIFIER, "X"),
-        Token(TokenKind.COMMA, ","),
-        Token(TokenKind.IDENTIFIER, "Y"),
-        Token(TokenKind.COMMA, ","),
-        Token(TokenKind.IDENTIFIER, "Z"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.CONSTANTS, "CONSTANTS", 1, 1),
+        Token(TokenKind.IDENTIFIER, "X", 1, 11),
+        Token(TokenKind.COMMA, ",", 1, 12),
+        Token(TokenKind.IDENTIFIER, "Y", 1, 14),
+        Token(TokenKind.COMMA, ",", 1, 15),
+        Token(TokenKind.IDENTIFIER, "Z", 1, 17),
+        Token(TokenKind.EOF, null, 1, 18)
       )
     )
   }
@@ -64,13 +64,13 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.VARIABLES, "VARIABLES"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.COMMA, ","),
-        Token(TokenKind.IDENTIFIER, "y"),
-        Token(TokenKind.COMMA, ","),
-        Token(TokenKind.IDENTIFIER, "z"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.VARIABLES, "VARIABLES", 1, 1),
+        Token(TokenKind.IDENTIFIER, "x", 1, 11),
+        Token(TokenKind.COMMA, ",", 1, 12),
+        Token(TokenKind.IDENTIFIER, "y", 1, 14),
+        Token(TokenKind.COMMA, ",", 1, 15),
+        Token(TokenKind.IDENTIFIER, "z", 1, 17),
+        Token(TokenKind.EOF, null, 1, 18)
       )
     )
   }
@@ -82,11 +82,11 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.ASSUME, "ASSUME"),
-        Token(TokenKind.IDENTIFIER, "X"),
-        Token(TokenKind.GT, ">"),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.ASSUME, "ASSUME", 1, 1),
+        Token(TokenKind.IDENTIFIER, "X", 1, 8),
+        Token(TokenKind.GT, ">", 1, 10),
+        Token(TokenKind.INTEGER, "0", 1, 12),
+        Token(TokenKind.EOF, null, 1, 13)
       )
     )
   }
@@ -98,17 +98,17 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "F"),
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.COMMA, ","),
-        Token(TokenKind.IDENTIFIER, "y"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.DEFINE, "=="),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.PLUS, "+"),
-        Token(TokenKind.IDENTIFIER, "y"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "F", 1, 1),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 2),
+        Token(TokenKind.IDENTIFIER, "x", 1, 3),
+        Token(TokenKind.COMMA, ",", 1, 4),
+        Token(TokenKind.IDENTIFIER, "y", 1, 6),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 7),
+        Token(TokenKind.DEFINE, "==", 1, 9),
+        Token(TokenKind.IDENTIFIER, "x", 1, 12),
+        Token(TokenKind.PLUS, "+", 1 ,14),
+        Token(TokenKind.IDENTIFIER, "y", 1, 16),
+        Token(TokenKind.EOF, null, 1, 17)
       )
     )
   }
@@ -120,17 +120,17 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "successor"),
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "n"),
-        Token(TokenKind.SET_IN, "\\in"),
-        Token(TokenKind.IDENTIFIER, "Nat"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.DEFINE, "=="),
-        Token(TokenKind.IDENTIFIER, "n"),
-        Token(TokenKind.PLUS, "+"),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "successor", 1, 1),
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "[", 1, 10),
+        Token(TokenKind.IDENTIFIER, "n", 1, 11),
+        Token(TokenKind.SET_IN, "\\in", 1, 13),
+        Token(TokenKind.IDENTIFIER, "Nat", 1, 17),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]", 1, 20),
+        Token(TokenKind.DEFINE, "==", 1, 22),
+        Token(TokenKind.IDENTIFIER, "n", 1, 25),
+        Token(TokenKind.PLUS, "+", 1, 27),
+        Token(TokenKind.INTEGER, "1", 1, 29),
+        Token(TokenKind.EOF, null, 1, 30)
       )
     )
   }
@@ -142,13 +142,13 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.INSTANCE, "INSTANCE"),
-        Token(TokenKind.IDENTIFIER, "M"),
-        Token(TokenKind.WITH, "WITH"),
-        Token(TokenKind.IDENTIFIER, "X"),
-        Token(TokenKind.LEFT_ARROW, "<-"),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.INSTANCE, "INSTANCE", 1, 1),
+        Token(TokenKind.IDENTIFIER, "M", 1, 10),
+        Token(TokenKind.WITH, "WITH", 1, 12),
+        Token(TokenKind.IDENTIFIER, "X", 1, 17),
+        Token(TokenKind.LEFT_ARROW, "<-", 1, 19),
+        Token(TokenKind.INTEGER, "1", 1, 22),
+        Token(TokenKind.EOF, null, 1, 23)
       )
     )
   }
@@ -160,23 +160,23 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.THEOREM, "THEOREM"),
-        Token(TokenKind.IDENTIFIER, "SuccessorReturnsTheNextNaturalNumber"),
-        Token(TokenKind.DEFINE, "=="),
-        Token(TokenKind.FORALL, "\\A"),
-        Token(TokenKind.IDENTIFIER, "n"),
-        Token(TokenKind.SET_IN, "\\in"),
-        Token(TokenKind.IDENTIFIER, "Nat"),
-        Token(TokenKind.COLON, ":"),
-        Token(TokenKind.IDENTIFIER, "successor"),
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "n"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.EQ, "="),
-        Token(TokenKind.IDENTIFIER, "n"),
-        Token(TokenKind.PLUS, "+"),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.THEOREM, "THEOREM", 1, 1),
+        Token(TokenKind.IDENTIFIER, "SuccessorReturnsTheNextNaturalNumber", 1, 9),
+        Token(TokenKind.DEFINE, "==", 1, 46),
+        Token(TokenKind.FORALL, "\\A", 1, 49),
+        Token(TokenKind.IDENTIFIER, "n", 1, 52),
+        Token(TokenKind.SET_IN, "\\in", 1, 54),
+        Token(TokenKind.IDENTIFIER, "Nat", 1, 58),
+        Token(TokenKind.COLON, ":", 1, 62),
+        Token(TokenKind.IDENTIFIER, "successor", 1, 64),
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "[", 1, 73),
+        Token(TokenKind.IDENTIFIER, "n", 1, 74),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]", 1, 75),
+        Token(TokenKind.EQ, "=", 1, 77),
+        Token(TokenKind.IDENTIFIER, "n", 1 ,79),
+        Token(TokenKind.PLUS, "+", 1, 81),
+        Token(TokenKind.INTEGER, "1", 1, 83),
+        Token(TokenKind.EOF, null, 1, 84)
       )
     )
   }
@@ -188,12 +188,12 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.AND, "/\\"),
-        Token(TokenKind.OR, "\\/"),
-        Token(TokenKind.NOT, "~"),
-        Token(TokenKind.IMPLICATION, "=>"),
-        Token(TokenKind.EQUIVALENCE, "<=>"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.AND, "/\\", 1, 1),
+        Token(TokenKind.OR, "\\/", 1, 4),
+        Token(TokenKind.NOT, "~", 1, 7),
+        Token(TokenKind.IMPLICATION, "=>", 1, 9),
+        Token(TokenKind.EQUIVALENCE, "<=>", 1, 12),
+        Token(TokenKind.EOF, null, 1, 15)
       )
     )
   }
@@ -205,10 +205,10 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.TRUE, "TRUE"),
-        Token(TokenKind.FALSE, "FALSE"),
-        Token(TokenKind.BOOLEAN, "BOOLEAN"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.TRUE, "TRUE", 1, 1),
+        Token(TokenKind.FALSE, "FALSE", 1, 6),
+        Token(TokenKind.BOOLEAN, "BOOLEAN", 1, 12),
+        Token(TokenKind.EOF, null, 1, 19)
       )
     )
   }
@@ -220,16 +220,16 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.FORALL, "\\A"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.SET_IN, "\\in"),
-        Token(TokenKind.IDENTIFIER, "S"),
-        Token(TokenKind.COLON, ":"),
-        Token(TokenKind.IDENTIFIER, "P"),
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.FORALL, "\\A", 1, 1),
+        Token(TokenKind.IDENTIFIER, "x", 1, 4),
+        Token(TokenKind.SET_IN, "\\in", 1, 6),
+        Token(TokenKind.IDENTIFIER, "S", 1, 10),
+        Token(TokenKind.COLON, ":", 1, 12),
+        Token(TokenKind.IDENTIFIER, "P", 1, 14),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 15),
+        Token(TokenKind.IDENTIFIER, "x", 1, 16),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 17),
+        Token(TokenKind.EOF, null, 1, 18)
       )
     )
   }
@@ -241,16 +241,16 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.EXISTS, "\\E"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.SET_IN, "\\in"),
-        Token(TokenKind.IDENTIFIER, "S"),
-        Token(TokenKind.COLON, ":"),
-        Token(TokenKind.IDENTIFIER, "P"),
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.EXISTS, "\\E", 1, 1),
+        Token(TokenKind.IDENTIFIER, "x", 1, 4),
+        Token(TokenKind.SET_IN, "\\in", 1, 6),
+        Token(TokenKind.IDENTIFIER, "S", 1, 10),
+        Token(TokenKind.COLON, ":", 1, 12),
+        Token(TokenKind.IDENTIFIER, "P", 1, 14),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 15),
+        Token(TokenKind.IDENTIFIER, "x", 1, 16),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 17),
+        Token(TokenKind.EOF, null, 1, 18)
       )
     )
   }
@@ -262,16 +262,16 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.CHOOSE, "CHOOSE"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.SET_IN, "\\in"),
-        Token(TokenKind.IDENTIFIER, "S"),
-        Token(TokenKind.COLON, ":"),
-        Token(TokenKind.IDENTIFIER, "P"),
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.CHOOSE, "CHOOSE", 1, 1),
+        Token(TokenKind.IDENTIFIER, "x", 1, 8),
+        Token(TokenKind.SET_IN, "\\in", 1, 10),
+        Token(TokenKind.IDENTIFIER, "S", 1, 14),
+        Token(TokenKind.COLON, ":", 1, 16),
+        Token(TokenKind.IDENTIFIER, "P", 1, 18),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 19),
+        Token(TokenKind.IDENTIFIER, "x", 1, 20),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 21),
+        Token(TokenKind.EOF, null, 1, 22)
       )
     )
   }
@@ -283,18 +283,18 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.EQ, "="),
-        Token(TokenKind.NEQ, "#"),
-        Token(TokenKind.NEQ, "/="),
-        Token(TokenKind.SET_IN, "\\in"),
-        Token(TokenKind.NOTIN, "\\notin"),
-        Token(TokenKind.UNION, "\\cup"),
-        Token(TokenKind.UNION, "\\union"),
-        Token(TokenKind.INTERSECT, "\\cap"),
-        Token(TokenKind.INTERSECT, "\\intersect"),
-        Token(TokenKind.SUBSET, "\\subset"),
-        Token(TokenKind.SET_DIFFERENCE, "\\"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.EQ, "=", 1, 1),
+        Token(TokenKind.NEQ, "#", 1, 3),
+        Token(TokenKind.NEQ, "/=", 1, 5),
+        Token(TokenKind.SET_IN, "\\in", 1, 8),
+        Token(TokenKind.NOTIN, "\\notin", 1, 12),
+        Token(TokenKind.UNION, "\\cup", 1, 19),
+        Token(TokenKind.UNION, "\\union", 1, 24),
+        Token(TokenKind.INTERSECT, "\\cap", 1, 31),
+        Token(TokenKind.INTERSECT, "\\intersect", 1, 36),
+        Token(TokenKind.SUBSET, "\\subset", 1, 47),
+        Token(TokenKind.SET_DIFFERENCE, "\\", 1, 55),
+        Token(TokenKind.EOF, null, 1, 56)
       )
     )
   }
@@ -306,14 +306,14 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_CURLY_BRACKET, "{"),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.COMMA, ","),
-        Token(TokenKind.INTEGER, "2"),
-        Token(TokenKind.COMMA, ","),
-        Token(TokenKind.INTEGER, "3"),
-        Token(TokenKind.RIGHT_CURLY_BRACKET, "}"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_CURLY_BRACKET, "{", 1, 1),
+        Token(TokenKind.INTEGER, "1", 1, 2),
+        Token(TokenKind.COMMA, ",", 1, 3),
+        Token(TokenKind.INTEGER, "2", 1, 5),
+        Token(TokenKind.COMMA, ",", 1, 6),
+        Token(TokenKind.INTEGER, "3", 1, 8),
+        Token(TokenKind.RIGHT_CURLY_BRACKET, "}", 1, 9),
+        Token(TokenKind.EOF, null, 1, 10)
       )
     )
   }
@@ -325,14 +325,14 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_CURLY_BRACKET, "{"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.SET_IN, "\\in"),
-        Token(TokenKind.IDENTIFIER, "S"),
-        Token(TokenKind.COLON, ":"),
-        Token(TokenKind.IDENTIFIER, "p"),
-        Token(TokenKind.RIGHT_CURLY_BRACKET, "}"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_CURLY_BRACKET, "{", 1, 1),
+        Token(TokenKind.IDENTIFIER, "x", 1, 3),
+        Token(TokenKind.SET_IN, "\\in", 1, 5),
+        Token(TokenKind.IDENTIFIER, "S", 1, 9),
+        Token(TokenKind.COLON, ":", 1, 11),
+        Token(TokenKind.IDENTIFIER, "p", 1, 13),
+        Token(TokenKind.RIGHT_CURLY_BRACKET, "}", 1, 14),
+        Token(TokenKind.EOF, null, 1, 15)
       )
     )
   }
@@ -344,14 +344,14 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_CURLY_BRACKET, "{"),
-        Token(TokenKind.IDENTIFIER, "e"),
-        Token(TokenKind.COLON, ":"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.SET_IN, "\\in"),
-        Token(TokenKind.IDENTIFIER, "S"),
-        Token(TokenKind.RIGHT_CURLY_BRACKET, "}"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_CURLY_BRACKET, "{", 1, 1),
+        Token(TokenKind.IDENTIFIER, "e", 1, 3),
+        Token(TokenKind.COLON, ":", 1, 5),
+        Token(TokenKind.IDENTIFIER, "x", 1, 7),
+        Token(TokenKind.SET_IN, "\\in", 1, 9),
+        Token(TokenKind.IDENTIFIER, "S", 1, 13),
+        Token(TokenKind.RIGHT_CURLY_BRACKET, "}", 1, 14),
+        Token(TokenKind.EOF, null, 1, 15)
       )
     )
   }
@@ -363,9 +363,9 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.BIG_SUBSET, "SUBSET"),
-        Token(TokenKind.IDENTIFIER, "S"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.BIG_SUBSET, "SUBSET", 1, 1),
+        Token(TokenKind.IDENTIFIER, "S", 1, 8),
+        Token(TokenKind.EOF, null, 1, 9)
       )
     )
   }
@@ -377,9 +377,9 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.BIG_UNION, "UNION"),
-        Token(TokenKind.IDENTIFIER, "S"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.BIG_UNION, "UNION", 1, 1),
+        Token(TokenKind.IDENTIFIER, "S", 1, 7),
+        Token(TokenKind.EOF, null, 1, 8)
       )
     )
   }
@@ -391,11 +391,11 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "f"),
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "e"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "f", 1, 1),
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "[", 1, 2),
+        Token(TokenKind.IDENTIFIER, "e", 1, 3),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]", 1, 4),
+        Token(TokenKind.EOF, null, 1, 5)
       )
     )
   }
@@ -407,9 +407,9 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.DOMAIN, "DOMAIN"),
-        Token(TokenKind.IDENTIFIER, "f"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.DOMAIN, "DOMAIN", 1, 1),
+        Token(TokenKind.IDENTIFIER, "f", 1, 8),
+        Token(TokenKind.EOF, null, 1, 9)
       )
     )
   }
@@ -421,14 +421,14 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.SET_IN, "\\in"),
-        Token(TokenKind.IDENTIFIER, "S"),
-        Token(TokenKind.MAPS_TO, "|->"),
-        Token(TokenKind.IDENTIFIER, "e"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "[", 1, 1),
+        Token(TokenKind.IDENTIFIER, "x", 1, 3),
+        Token(TokenKind.SET_IN, "\\in", 1, 5),
+        Token(TokenKind.IDENTIFIER, "S", 1, 9),
+        Token(TokenKind.MAPS_TO, "|->", 1, 11),
+        Token(TokenKind.IDENTIFIER, "e", 1, 15),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]", 1, 16),
+        Token(TokenKind.EOF, null, 1, 17)
       )
     )
   }
@@ -440,12 +440,12 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "S"),
-        Token(TokenKind.RIGHT_ARROW, "->"),
-        Token(TokenKind.IDENTIFIER, "T"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "[", 1, 1),
+        Token(TokenKind.IDENTIFIER, "S", 1, 2),
+        Token(TokenKind.RIGHT_ARROW, "->", 1, 4),
+        Token(TokenKind.IDENTIFIER, "T", 1, 7),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]", 1, 8),
+        Token(TokenKind.EOF, null, 1, 9)
       )
     )
   }
@@ -457,17 +457,17 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "f"),
-        Token(TokenKind.EXCEPT, "EXCEPT"),
-        Token(TokenKind.BANG, "!"),
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "e1"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.EQ, "="),
-        Token(TokenKind.IDENTIFIER, "e2"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "[", 1, 1),
+        Token(TokenKind.IDENTIFIER, "f", 1, 2),
+        Token(TokenKind.EXCEPT, "EXCEPT", 1, 4),
+        Token(TokenKind.BANG, "!", 1, 11),
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "[", 1, 12),
+        Token(TokenKind.IDENTIFIER, "e1", 1, 13),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]", 1, 15),
+        Token(TokenKind.EQ, "=", 1, 16),
+        Token(TokenKind.IDENTIFIER, "e2", 1, 17),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]", 1, 19),
+        Token(TokenKind.EOF, null, 1, 20)
       )
     )
   }
@@ -479,10 +479,10 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "e"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.IDENTIFIER, "h"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "e", 1, 1),
+        Token(TokenKind.DOT, ".", 1, 2),
+        Token(TokenKind.IDENTIFIER, "h", 1, 3),
+        Token(TokenKind.EOF, null, 1, 4)
       )
     )
   }
@@ -494,16 +494,16 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "h1"),
-        Token(TokenKind.MAPS_TO, "|->"),
-        Token(TokenKind.IDENTIFIER, "e1"),
-        Token(TokenKind.COMMA, ","),
-        Token(TokenKind.IDENTIFIER, "h2"),
-        Token(TokenKind.MAPS_TO, "|->"),
-        Token(TokenKind.IDENTIFIER, "e2"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "[", 1, 1),
+        Token(TokenKind.IDENTIFIER, "h1", 1, 2),
+        Token(TokenKind.MAPS_TO, "|->", 1, 5),
+        Token(TokenKind.IDENTIFIER, "e1", 1, 9),
+        Token(TokenKind.COMMA, ",", 1, 11),
+        Token(TokenKind.IDENTIFIER, "h2", 1, 13),
+        Token(TokenKind.MAPS_TO, "|->", 1, 16),
+        Token(TokenKind.IDENTIFIER, "e2", 1, 20),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]", 1, 22),
+        Token(TokenKind.EOF, null, 1, 23)
       )
     )
   }
@@ -515,16 +515,16 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "h1"),
-        Token(TokenKind.COLON, ":"),
-        Token(TokenKind.IDENTIFIER, "S1"),
-        Token(TokenKind.COMMA, ","),
-        Token(TokenKind.IDENTIFIER, "h2"),
-        Token(TokenKind.COLON, ":"),
-        Token(TokenKind.IDENTIFIER, "S2"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "[", 1, 1),
+        Token(TokenKind.IDENTIFIER, "h1", 1, 2),
+        Token(TokenKind.COLON, ":", 1, 5),
+        Token(TokenKind.IDENTIFIER, "S1", 1, 7),
+        Token(TokenKind.COMMA, ",", 1, 9),
+        Token(TokenKind.IDENTIFIER, "h2", 1, 11),
+        Token(TokenKind.COLON, ":", 1, 14),
+        Token(TokenKind.IDENTIFIER, "S2", 1, 16),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]", 1, 18),
+        Token(TokenKind.EOF, null, 1, 19)
       )
     )
   }
@@ -536,16 +536,16 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "r"),
-        Token(TokenKind.EXCEPT, "EXCEPT"),
-        Token(TokenKind.BANG, "!"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.IDENTIFIER, "h"),
-        Token(TokenKind.EQ, "="),
-        Token(TokenKind.IDENTIFIER, "e"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "[", 1, 1),
+        Token(TokenKind.IDENTIFIER, "r", 1, 2),
+        Token(TokenKind.EXCEPT, "EXCEPT", 1, 4),
+        Token(TokenKind.BANG, "!", 1, 11),
+        Token(TokenKind.DOT, ".", 1, 12),
+        Token(TokenKind.IDENTIFIER, "h", 1, 13),
+        Token(TokenKind.EQ, "=", 1, 15),
+        Token(TokenKind.IDENTIFIER, "e", 1, 17),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]", 1, 18),
+        Token(TokenKind.EOF, null, 1, 19)
       )
     )
   }
@@ -557,12 +557,12 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
-        Token(TokenKind.IDENTIFIER, "e1"),
-        Token(TokenKind.COMMA, ","),
-        Token(TokenKind.IDENTIFIER, "e2"),
-        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<", 1, 1),
+        Token(TokenKind.IDENTIFIER, "e1", 1, 3),
+        Token(TokenKind.COMMA, ",", 1, 5),
+        Token(TokenKind.IDENTIFIER, "e2", 1, 7),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>", 1, 9),
+        Token(TokenKind.EOF, null, 1, 11)
       )
     )
   }
@@ -574,10 +574,10 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "S1"),
-        Token(TokenKind.TIMES, "\\X"),
-        Token(TokenKind.IDENTIFIER, "S2"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "S1", 1, 1),
+        Token(TokenKind.TIMES, "\\X", 1, 4),
+        Token(TokenKind.IDENTIFIER, "S2", 1, 7),
+        Token(TokenKind.EOF, null, 1, 9)
       )
     )
   }
@@ -589,13 +589,13 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IF, "IF"),
-        Token(TokenKind.IDENTIFIER, "p"),
-        Token(TokenKind.THEN, "THEN"),
-        Token(TokenKind.IDENTIFIER, "e1"),
-        Token(TokenKind.ELSE, "ELSE"),
-        Token(TokenKind.IDENTIFIER, "e2"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IF, "IF", 1, 1),
+        Token(TokenKind.IDENTIFIER, "p", 1, 4),
+        Token(TokenKind.THEN, "THEN", 1, 6),
+        Token(TokenKind.IDENTIFIER, "e1", 1, 11),
+        Token(TokenKind.ELSE, "ELSE", 1, 14),
+        Token(TokenKind.IDENTIFIER, "e2", 1, 19),
+        Token(TokenKind.EOF, null, 1, 21)
       )
     )
   }
@@ -607,19 +607,19 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.CASE, "CASE"),
-        Token(TokenKind.IDENTIFIER, "p1"),
-        Token(TokenKind.RIGHT_ARROW, "->"),
-        Token(TokenKind.IDENTIFIER, "e1"),
-        Token(TokenKind.SQUARE, "[]"),
-        Token(TokenKind.IDENTIFIER, "p2"),
-        Token(TokenKind.RIGHT_ARROW, "->"),
-        Token(TokenKind.IDENTIFIER, "e2"),
-        Token(TokenKind.SQUARE, "[]"),
-        Token(TokenKind.OTHER, "OTHER"),
-        Token(TokenKind.RIGHT_ARROW, "->"),
-        Token(TokenKind.IDENTIFIER, "e"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.CASE, "CASE", 1, 1),
+        Token(TokenKind.IDENTIFIER, "p1", 1, 6),
+        Token(TokenKind.RIGHT_ARROW, "->", 1, 9),
+        Token(TokenKind.IDENTIFIER, "e1", 1, 12),
+        Token(TokenKind.SQUARE, "[]", 1, 15),
+        Token(TokenKind.IDENTIFIER, "p2", 1, 18),
+        Token(TokenKind.RIGHT_ARROW, "->", 1, 21),
+        Token(TokenKind.IDENTIFIER, "e2", 1, 24),
+        Token(TokenKind.SQUARE, "[]", 1, 27),
+        Token(TokenKind.OTHER, "OTHER", 1, 30),
+        Token(TokenKind.RIGHT_ARROW, "->", 1, 36),
+        Token(TokenKind.IDENTIFIER, "e", 1, 39),
+        Token(TokenKind.EOF, null, 1, 40)
       )
     )
   }
@@ -631,13 +631,13 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LET, "LET"),
-        Token(TokenKind.IDENTIFIER, "d1"),
-        Token(TokenKind.DEFINE, "=="),
-        Token(TokenKind.IDENTIFIER, "e1"),
-        Token(TokenKind.IN, "IN"),
-        Token(TokenKind.IDENTIFIER, "e"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LET, "LET", 1, 1),
+        Token(TokenKind.IDENTIFIER, "d1", 1, 5),
+        Token(TokenKind.DEFINE, "==", 1, 8),
+        Token(TokenKind.IDENTIFIER, "e1", 1, 11),
+        Token(TokenKind.IN, "IN", 1, 14),
+        Token(TokenKind.IDENTIFIER, "e", 1, 17),
+        Token(TokenKind.EOF, null, 1, 18)
       )
     )
   }
@@ -650,11 +650,11 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.AND, "/\\"),
-        Token(TokenKind.IDENTIFIER, "p1"),
-        Token(TokenKind.AND, "/\\"),
-        Token(TokenKind.IDENTIFIER, "p2"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.AND, "/\\", 1, 1),
+        Token(TokenKind.IDENTIFIER, "p1", 1, 4),
+        Token(TokenKind.AND, "/\\", 2, 1),
+        Token(TokenKind.IDENTIFIER, "p2", 2, 4),
+        Token(TokenKind.EOF, null, 2, 6)
       )
     )
   }
@@ -666,9 +666,9 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "e"),
-        Token(TokenKind.PRIME, "'"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "e", 1, 1),
+        Token(TokenKind.PRIME, "'", 1, 2),
+        Token(TokenKind.EOF, null, 1, 3)
       )
     )
   }
@@ -680,14 +680,14 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "A"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.UNDERSCORE, "_"),
-        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
-        Token(TokenKind.IDENTIFIER, "e1"),
-        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "[", 1, 1),
+        Token(TokenKind.IDENTIFIER, "A", 1, 2),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]", 1, 3),
+        Token(TokenKind.UNDERSCORE, "_", 1, 4),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<", 1, 5),
+        Token(TokenKind.IDENTIFIER, "e1", 1, 7),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>", 1, 9),
+        Token(TokenKind.EOF, null, 1, 11)
       )
     )
   }
@@ -699,14 +699,14 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
-        Token(TokenKind.IDENTIFIER, "A"),
-        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
-        Token(TokenKind.UNDERSCORE, "_"),
-        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
-        Token(TokenKind.IDENTIFIER, "e1"),
-        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<", 1, 1),
+        Token(TokenKind.IDENTIFIER, "A", 1, 3),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>", 1, 4),
+        Token(TokenKind.UNDERSCORE, "_", 1, 6),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<", 1, 7),
+        Token(TokenKind.IDENTIFIER, "e1", 1, 9),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>", 1, 11),
+        Token(TokenKind.EOF, null, 1, 13)
       )
     )
   }
@@ -718,9 +718,9 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.ENABLED, "ENABLED"),
-        Token(TokenKind.IDENTIFIER, "A"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.ENABLED, "ENABLED", 1, 1),
+        Token(TokenKind.IDENTIFIER, "A", 1, 9),
+        Token(TokenKind.EOF, null, 1, 10)
       )
     )
   }
@@ -732,9 +732,9 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.UNCHANGED, "UNCHANGED"),
-        Token(TokenKind.IDENTIFIER, "A"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.UNCHANGED, "UNCHANGED", 1, 1),
+        Token(TokenKind.IDENTIFIER, "A", 1, 11),
+        Token(TokenKind.EOF, null, 1, 12)
       )
     )
   }
@@ -746,9 +746,9 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.SQUARE, "[]"),
-        Token(TokenKind.IDENTIFIER, "F"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.SQUARE, "[]", 1, 1),
+        Token(TokenKind.IDENTIFIER, "F", 1, 4),
+        Token(TokenKind.EOF, null, 1, 5)
       )
     )
   }
@@ -760,9 +760,9 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.DIAMOND, "<>"),
-        Token(TokenKind.IDENTIFIER, "F"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.DIAMOND, "<>", 1, 1),
+        Token(TokenKind.IDENTIFIER, "F", 1, 4),
+        Token(TokenKind.EOF, null, 1, 5)
       )
     )
   }
@@ -774,13 +774,13 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.WF, "WF"),
-        Token(TokenKind.UNDERSCORE, "_"),
-        Token(TokenKind.IDENTIFIER, "e"),
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.IDENTIFIER, "A"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.WF, "WF", 1, 1),
+        Token(TokenKind.UNDERSCORE, "_", 1, 3),
+        Token(TokenKind.IDENTIFIER, "e", 1, 4),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 5),
+        Token(TokenKind.IDENTIFIER, "A", 1, 6),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 7),
+        Token(TokenKind.EOF, null, 1, 8)
       )
     )
   }
@@ -792,13 +792,13 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.SF, "SF"),
-        Token(TokenKind.UNDERSCORE, "_"),
-        Token(TokenKind.IDENTIFIER, "e"),
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.IDENTIFIER, "A"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.SF, "SF", 1, 1),
+        Token(TokenKind.UNDERSCORE, "_", 1, 3),
+        Token(TokenKind.IDENTIFIER, "e", 1, 4),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 5),
+        Token(TokenKind.IDENTIFIER, "A", 1, 6),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 7),
+        Token(TokenKind.EOF, null, 1, 8)
       )
     )
   }
@@ -810,10 +810,10 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "F"),
-        Token(TokenKind.LEADS_TO, "~>"),
-        Token(TokenKind.IDENTIFIER, "G"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "F", 1, 1),
+        Token(TokenKind.LEADS_TO, "~>", 1, 3),
+        Token(TokenKind.IDENTIFIER, "G", 1, 6),
+        Token(TokenKind.EOF, null, 1, 7)
       )
     )
   }
@@ -825,10 +825,10 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "seq1"),
-        Token(TokenKind.CIRCLE, "\\o"),
-        Token(TokenKind.IDENTIFIER, "seq2"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "seq1", 1, 1),
+        Token(TokenKind.CIRCLE, "\\o", 1, 6),
+        Token(TokenKind.IDENTIFIER, "seq2", 1, 9),
+        Token(TokenKind.EOF, null, 1, 13)
       )
     )
   }
@@ -840,10 +840,10 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "seq1"),
-        Token(TokenKind.CIRCLE, "\\circ"),
-        Token(TokenKind.IDENTIFIER, "seq2"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "seq1", 1, 1),
+        Token(TokenKind.CIRCLE, "\\circ", 1, 6),
+        Token(TokenKind.IDENTIFIER, "seq2", 1, 12),
+        Token(TokenKind.EOF, null, 1, 16)
       )
     )
   }
@@ -855,10 +855,10 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "bag1"),
-        Token(TokenKind.OPLUS, "(+)"),
-        Token(TokenKind.IDENTIFIER, "bag2"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "bag1", 1, 1),
+        Token(TokenKind.OPLUS, "(+)", 1, 6),
+        Token(TokenKind.IDENTIFIER, "bag2", 1, 10),
+        Token(TokenKind.EOF, null, 1, 14)
       )
     )
   }
@@ -870,10 +870,10 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "bag1"),
-        Token(TokenKind.OPLUS, "\\oplus"),
-        Token(TokenKind.IDENTIFIER, "bag2"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "bag1", 1, 1),
+        Token(TokenKind.OPLUS, "\\oplus", 1, 6),
+        Token(TokenKind.IDENTIFIER, "bag2", 1, 13),
+        Token(TokenKind.EOF, null, 1, 17)
       )
     )
   }
@@ -885,10 +885,10 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "bag1"),
-        Token(TokenKind.OMINUS, "(-)"),
-        Token(TokenKind.IDENTIFIER, "bag2"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "bag1", 1, 1),
+        Token(TokenKind.OMINUS, "(-)", 1, 6),
+        Token(TokenKind.IDENTIFIER, "bag2", 1, 10),
+        Token(TokenKind.EOF, null, 1, 14)
       )
     )
   }
@@ -900,10 +900,10 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "bag1"),
-        Token(TokenKind.OMINUS, "\\ominus"),
-        Token(TokenKind.IDENTIFIER, "bag2"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "bag1", 1, 1),
+        Token(TokenKind.OMINUS, "\\ominus", 1, 6),
+        Token(TokenKind.IDENTIFIER, "bag2", 1, 14),
+        Token(TokenKind.EOF, null, 1, 18)
       )
     )
   }
@@ -915,10 +915,10 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "bag1"),
-        Token(TokenKind.SQSUBSETEQ, "\\sqsubseteq"),
-        Token(TokenKind.IDENTIFIER, "bag2"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "bag1", 1, 1),
+        Token(TokenKind.SQSUBSETEQ, "\\sqsubseteq", 1, 6),
+        Token(TokenKind.IDENTIFIER, "bag2", 1, 18),
+        Token(TokenKind.EOF, null, 1, 22)
       )
     )
   }
@@ -930,8 +930,8 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.COLON_LT, ":>"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.COLON_LT, ":>", 1, 1),
+        Token(TokenKind.EOF, null, 1, 3)
       )
     )
   }
@@ -943,12 +943,12 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_CURLY_BRACKET, "{"),
-        Token(TokenKind.STRING, "string1"),
-        Token(TokenKind.COMMA, ","),
-        Token(TokenKind.STRING, "string2"),
-        Token(TokenKind.RIGHT_CURLY_BRACKET, "}"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_CURLY_BRACKET, "{", 1, 2),
+        Token(TokenKind.STRING, "string1", 1, 3),
+        Token(TokenKind.COMMA, ",", 1, 12),
+        Token(TokenKind.STRING, "string2", 1, 14),
+        Token(TokenKind.RIGHT_CURLY_BRACKET, "}", 1, 23),
+        Token(TokenKind.EOF, null, 1, 25)
       )
     )
   }
@@ -960,13 +960,13 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_CURLY_BRACKET, "{"),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.COMMA, ","),
-        Token(TokenKind.MINUS, "-"),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.RIGHT_CURLY_BRACKET, "}"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_CURLY_BRACKET, "{", 1, 2),
+        Token(TokenKind.INTEGER, "1", 1, 3),
+        Token(TokenKind.COMMA, ",", 1, 4),
+        Token(TokenKind.MINUS, "-", 1, 6),
+        Token(TokenKind.INTEGER, "1", 1, 7),
+        Token(TokenKind.RIGHT_CURLY_BRACKET, "}", 1, 8),
+        Token(TokenKind.EOF, null, 1, 10)
       )
     )
   }
@@ -979,8 +979,8 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.INTEGER, "1", 2, 1),
+        Token(TokenKind.EOF, null, 2, 2)
       )
     )
   }
@@ -992,8 +992,8 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.INTEGER, "1", 1, 1),
+        Token(TokenKind.EOF, null, 1, 17)
       )
     )
   }
@@ -1006,8 +1006,8 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.INTEGER, "1", 2, 1),
+        Token(TokenKind.EOF, null, 2, 2)
       )
     )
   }
@@ -1020,10 +1020,10 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.PLUS, "+"),
-        Token(TokenKind.INTEGER, "2"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.INTEGER, "1", 1, 2),
+        Token(TokenKind.PLUS, "+", 2, 9),
+        Token(TokenKind.INTEGER, "2", 2, 11),
+        Token(TokenKind.EOF, null, 2, 12)
       )
     )
   }
@@ -1036,291 +1036,240 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.EPC_CONTEXT_OPEN, "--EPC"),
-        Token(TokenKind.IDENTIFIER, "foo"),
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.IDENTIFIER, "p"),
-        Token(TokenKind.EQ, "="),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
-        Token(TokenKind.SQUARE, "[]"),
-        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
-        Token(TokenKind.EPC_VAR, "var"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
-        Token(TokenKind.EPC_CONTEXT_CLOSE, ""),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.EPC_CONTEXT_OPEN, "--EPC", 1, 1),
+        Token(TokenKind.IDENTIFIER, "foo", 1, 10),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 2, 2),
+        Token(TokenKind.IDENTIFIER, "p", 2, 3),
+        Token(TokenKind.EQ, "=", 2, 5),
+        Token(TokenKind.INTEGER, "1", 2, 7),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 2, 8),
+        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[[", 2, 10),
+        Token(TokenKind.SQUARE, "[]", 2, 13),
+        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|", 2, 16),
+        Token(TokenKind.EPC_VAR, "var", 2, 19),
+        Token(TokenKind.IDENTIFIER, "x", 2, 23),
+        Token(TokenKind.DOT, ".", 2, 24),
+        Token(TokenKind.INTEGER, "0", 2, 26),
+        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]", 2, 28),
+        Token(TokenKind.EPC_CONTEXT_CLOSE, "", 2, 31),
+        Token(TokenKind.EOF, null, 2, 33)
       )
     )
   }
 
   test("Recognizes EPC 'var' declarations") {
     val inputSpec =
-      """var x.0""".stripMargin
+      """var x""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.EPC_VAR, "var"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.EPC_VAR, "var", 1, 1),
+        Token(TokenKind.IDENTIFIER, "x", 1, 5),
+        Token(TokenKind.EOF, null, 1, 6)
       )
     )
   }
 
   test("Recognizes EPC 'assign' actions") {
     val inputSpec =
-      """<< x := 10 >>.0""".stripMargin
+      """<< x := 10 >>""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.EPC_ASSIGN, ":="),
-        Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<", 1, 1),
+        Token(TokenKind.IDENTIFIER, "x", 1, 4),
+        Token(TokenKind.EPC_ASSIGN, ":=", 1, 6),
+        Token(TokenKind.INTEGER, "10", 1, 9),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>", 1, 12),
+        Token(TokenKind.EOF, null, 1, 14)
       )
     )
   }
 
   test("Recognizes single EPC location with an integer id") {
     val inputSpec =
-      """(p = 1) [[ [x |-> Undefined] <| var x. <<x := 10>>. 0 ]]""".stripMargin
+      """(p = 1) [[ [x |-> Undefined] <| (j = 1) (var x; <<x := 10>>) ]]""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.IDENTIFIER, "p"),
-        Token(TokenKind.EQ, "="),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.MAPS_TO, "|->"),
-        Token(TokenKind.IDENTIFIER, "Undefined"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
-        Token(TokenKind.EPC_VAR, "var"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.EPC_ASSIGN, ":="),
-        Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 1),
+        Token(TokenKind.IDENTIFIER, "p", 1, 2),
+        Token(TokenKind.EQ, "=", 1, 4),
+        Token(TokenKind.INTEGER, "1", 1, 6),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 7),
+        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[[", 1, 9),
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "[", 1, 12),
+        Token(TokenKind.IDENTIFIER, "x", 1, 13),
+        Token(TokenKind.MAPS_TO, "|->", 1, 15),
+        Token(TokenKind.IDENTIFIER, "Undefined", 1, 19),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]", 1, 28),
+        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|", 1, 30),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 33),
+        Token(TokenKind.IDENTIFIER, "j", 1, 34),
+        Token(TokenKind.EQ, "=", 1, 36),
+        Token(TokenKind.INTEGER, "1", 1, 38),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 39),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 41),
+        Token(TokenKind.EPC_VAR, "var", 1, 42),
+        Token(TokenKind.IDENTIFIER, "x", 1, 46),
+        Token(TokenKind.SEMICOLON, ";", 1, 47),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<", 1, 49),
+        Token(TokenKind.IDENTIFIER, "x", 1, 51),
+        Token(TokenKind.EPC_ASSIGN, ":=", 1, 53),
+        Token(TokenKind.INTEGER, "10", 1, 56),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>", 1, 58),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 60),
+        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]", 1, 62),
+        Token(TokenKind.EOF, null, 1, 64)
       )
     )
   }
 
   test("Recognizes single EPC location with a string id") {
     val inputSpec =
-      """(q = "a") [[ [x |-> Undefined] <| var x. <<x := 10>>. 0 ]]""".stripMargin
+      """(q = "a") [[ [x |-> Undefined] <| (j = "a") (var x; <<x := 10>>) ]]""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.IDENTIFIER, "q"),
-        Token(TokenKind.EQ, "="),
-        Token(TokenKind.STRING, "a"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.MAPS_TO, "|->"),
-        Token(TokenKind.IDENTIFIER, "Undefined"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
-        Token(TokenKind.EPC_VAR, "var"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.EPC_ASSIGN, ":="),
-        Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 1),
+        Token(TokenKind.IDENTIFIER, "q", 1, 2),
+        Token(TokenKind.EQ, "=", 1, 4),
+        Token(TokenKind.STRING, "a", 1, 6),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 9),
+        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[[", 1, 11),
+        Token(TokenKind.LEFT_SQUARE_BRACKET, "[", 1, 14),
+        Token(TokenKind.IDENTIFIER, "x", 1, 15),
+        Token(TokenKind.MAPS_TO, "|->", 1, 17),
+        Token(TokenKind.IDENTIFIER, "Undefined", 1, 21),
+        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]", 1, 30),
+        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|", 1, 32),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 35),
+        Token(TokenKind.IDENTIFIER, "j", 1, 36),
+        Token(TokenKind.EQ, "=", 1, 38),
+        Token(TokenKind.STRING, "a", 1, 40),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 43),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 45),
+        Token(TokenKind.EPC_VAR, "var", 1, 46),
+        Token(TokenKind.IDENTIFIER, "x", 1, 50),
+        Token(TokenKind.SEMICOLON, ";", 1, 51),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<", 1, 53),
+        Token(TokenKind.IDENTIFIER, "x", 1, 55),
+        Token(TokenKind.EPC_ASSIGN, ":=", 1, 57),
+        Token(TokenKind.INTEGER, "10", 1, 60),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>", 1, 62),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 64),
+        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]", 1, 66),
+        Token(TokenKind.EOF, null, 1, 68)
       )
     )
   }
 
   test("Recognizes multiple EPC locations with integer ids") {
     val inputSpec =
-      """|| (p \in 1..10) [[ [x |-> Undefined] <| var x. <<x := 10>>. 0 ]]"""
+      """(p \in 1..10) [[ [] <| (j = 1)( {{ }} ) ]]"""
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.EPC_LOC_COMPOSITION, "||"),
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.IDENTIFIER, "p"),
-        Token(TokenKind.SET_IN, "\\in"),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.DOT_DOT, ".."),
-        Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.MAPS_TO, "|->"),
-        Token(TokenKind.IDENTIFIER, "Undefined"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
-        Token(TokenKind.EPC_VAR, "var"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.EPC_ASSIGN, ":="),
-        Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 1),
+        Token(TokenKind.IDENTIFIER, "p", 1, 2),
+        Token(TokenKind.SET_IN, "\\in", 1, 4),
+        Token(TokenKind.INTEGER, "1", 1, 8),
+        Token(TokenKind.DOT_DOT, "..", 1, 9),
+        Token(TokenKind.INTEGER, "10", 1, 11),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 13),
+        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[[", 1, 15),
+        Token(TokenKind.SQUARE, "[]", 1, 18),
+        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|", 1, 21),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 24),
+        Token(TokenKind.IDENTIFIER, "j", 1, 25),
+        Token(TokenKind.EQ, "=", 1, 27),
+        Token(TokenKind.INTEGER, "1", 1, 29),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 30),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 31),
+        Token(TokenKind.EPC_MULTISET_OPEN, "{{", 1, 33),
+        Token(TokenKind.EPC_MULTISET_CLOSE, "}}", 1, 36),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 39),
+        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]", 1, 41),
+        Token(TokenKind.EOF, null, 1, 43)
       )
     )
   }
 
   test("Recognizes multiple EPC locations with string ids") {
     val inputSpec =
-      """|| (q \in {"a", "b"}) [[ [x |-> Undefined] <| var x. <<x := 10>>. 0 ]]"""
+      """(q \in {"a", "b"}) [[ [] <| (j = 1)( {{ }} ) ]]""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.EPC_LOC_COMPOSITION, "||"),
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.IDENTIFIER, "q"),
-        Token(TokenKind.SET_IN, "\\in"),
-        Token(TokenKind.LEFT_CURLY_BRACKET, "{"),
-        Token(TokenKind.STRING, "a"),
-        Token(TokenKind.COMMA, ","),
-        Token(TokenKind.STRING, "b"),
-        Token(TokenKind.RIGHT_CURLY_BRACKET, "}"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.MAPS_TO, "|->"),
-        Token(TokenKind.IDENTIFIER, "Undefined"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
-        Token(TokenKind.EPC_VAR, "var"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.EPC_ASSIGN, ":="),
-        Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
-        Token(TokenKind.EOF, null)
-      )
-    )
-  }
-
-  test("Recognizes EPC Initialized value ") {
-    val inputSpec =
-      """(p = 1) [[ [x |-> Initialized] <| 0 ]]""".stripMargin
-
-    val tokens = recognizeTokens(inputSpec)
-    assert(tokens ==
-      List(
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.IDENTIFIER, "p"),
-        Token(TokenKind.EQ, "="),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
-        Token(TokenKind.LEFT_SQUARE_BRACKET, "["),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.MAPS_TO, "|->"),
-        Token(TokenKind.IDENTIFIER, "Initialized"),
-        Token(TokenKind.RIGHT_SQUARE_BRACKET, "]"),
-        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 1),
+        Token(TokenKind.IDENTIFIER, "q", 1, 2),
+        Token(TokenKind.SET_IN, "\\in", 1, 4),
+        Token(TokenKind.LEFT_CURLY_BRACKET, "{", 1, 8),
+        Token(TokenKind.STRING, "a", 1, 9),
+        Token(TokenKind.COMMA, ",", 1, 12),
+        Token(TokenKind.STRING, "b", 1, 14),
+        Token(TokenKind.RIGHT_CURLY_BRACKET, "}", 1, 17),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 18),
+        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[[", 1, 20),
+        Token(TokenKind.SQUARE, "[]", 1, 23),
+        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|", 1, 26),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 29),
+        Token(TokenKind.IDENTIFIER, "j", 1, 30),
+        Token(TokenKind.EQ, "=", 1, 32),
+        Token(TokenKind.INTEGER, "1", 1, 34),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 35),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 36),
+        Token(TokenKind.EPC_MULTISET_OPEN, "{{", 1, 38),
+        Token(TokenKind.EPC_MULTISET_CLOSE, "}}", 1, 41),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 44),
+        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]", 1, 46),
+        Token(TokenKind.EOF, null, 1, 48)
       )
     )
   }
 
   test("Recognizes thread compositions") {
     val inputSpec =
-      """(p = 1) [[ [] <|
-        |           ( var x. <<x := 10>>. 0
-        |           | var y. <<y := 10>>. 0
-        |           | var z. <<z := 10>>. 0)
-        |]]""".stripMargin
+      """(p = 1) [[ [] <| (j = 1) ({{ }}) | (k = 2) ({{ }}) ]]""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.IDENTIFIER, "p"),
-        Token(TokenKind.EQ, "="),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[["),
-        Token(TokenKind.SQUARE, "[]"),
-        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|"),
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.EPC_VAR, "var"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.EPC_ASSIGN, ":="),
-        Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.EPC_THREAD_COMPOSITION, "|"),
-        Token(TokenKind.EPC_VAR, "var"),
-        Token(TokenKind.IDENTIFIER, "y"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
-        Token(TokenKind.IDENTIFIER, "y"),
-        Token(TokenKind.EPC_ASSIGN, ":="),
-        Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.EPC_THREAD_COMPOSITION, "|"),
-        Token(TokenKind.EPC_VAR, "var"),
-        Token(TokenKind.IDENTIFIER, "z"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
-        Token(TokenKind.IDENTIFIER, "z"),
-        Token(TokenKind.EPC_ASSIGN, ":="),
-        Token(TokenKind.INTEGER, "10"),
-        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 1),
+        Token(TokenKind.IDENTIFIER, "p", 1, 2),
+        Token(TokenKind.EQ, "=", 1, 4),
+        Token(TokenKind.INTEGER, "1", 1, 6),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 7),
+        Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[[", 1, 9),
+        Token(TokenKind.SQUARE, "[]", 1, 12),
+        Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|", 1, 15),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 18),
+        Token(TokenKind.IDENTIFIER, "j", 1, 19),
+        Token(TokenKind.EQ, "=", 1, 21),
+        Token(TokenKind.INTEGER, "1", 1, 23),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 24),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 26),
+        Token(TokenKind.EPC_MULTISET_OPEN, "{{", 1, 27),
+        Token(TokenKind.EPC_MULTISET_CLOSE, "}}", 1, 30),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 32),
+        Token(TokenKind.EPC_THREAD_COMPOSITION, "|", 1, 34),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 36),
+        Token(TokenKind.IDENTIFIER, "k", 1, 37),
+        Token(TokenKind.EQ, "=", 1, 39),
+        Token(TokenKind.INTEGER, "2", 1, 41),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 42),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 44),
+        Token(TokenKind.EPC_MULTISET_OPEN, "{{", 1, 45),
+        Token(TokenKind.EPC_MULTISET_CLOSE, "}}", 1, 48),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 50),
+        Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]", 1, 52),
+        Token(TokenKind.EOF, null, 1, 54)
       )
     )
   }
@@ -1332,9 +1281,9 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.EPC_NEW, "new"),
-        Token(TokenKind.IDENTIFIER, "c"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.EPC_NEW, "new", 1, 1),
+        Token(TokenKind.IDENTIFIER, "c", 1, 5),
+        Token(TokenKind.EOF, null, 1, 6)
       )
     )
   }
@@ -1346,14 +1295,14 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "c"),
-        Token(TokenKind.AT, "@"),
-        Token(TokenKind.INTEGER, "2"),
-        Token(TokenKind.QUESTION_MARK, "?"),
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "c", 1, 1),
+        Token(TokenKind.AT, "@", 1, 2),
+        Token(TokenKind.INTEGER, "2", 1, 3),
+        Token(TokenKind.QUESTION_MARK, "?", 1, 4),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 5),
+        Token(TokenKind.IDENTIFIER, "x", 1, 6),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 7),
+        Token(TokenKind.EOF, null, 1, 8)
       )
     )
   }
@@ -1365,13 +1314,13 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "c"),
-        Token(TokenKind.AT, "@"),
-        Token(TokenKind.INTEGER, "2"),
-        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "c", 1, 1),
+        Token(TokenKind.AT, "@", 1, 2),
+        Token(TokenKind.INTEGER, "2", 1, 3),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<", 1, 4),
+        Token(TokenKind.IDENTIFIER, "x", 1, 6),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>", 1, 7),
+        Token(TokenKind.EOF, null, 1, 9)
       )
     )
   }
@@ -1383,16 +1332,16 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.IDENTIFIER, "c"),
-        Token(TokenKind.LEFT_CURLY_BRACKET, "{"),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.RIGHT_ARROW, "->"),
-        Token(TokenKind.INTEGER, "2"),
-        Token(TokenKind.RIGHT_CURLY_BRACKET, "}"),
-        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<"),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.IDENTIFIER, "c", 1, 1),
+        Token(TokenKind.LEFT_CURLY_BRACKET, "{", 1, 2),
+        Token(TokenKind.INTEGER, "1", 1, 3),
+        Token(TokenKind.RIGHT_ARROW, "->", 1, 5),
+        Token(TokenKind.INTEGER, "2", 1, 8),
+        Token(TokenKind.RIGHT_CURLY_BRACKET, "}", 1, 9),
+        Token(TokenKind.LEFT_ANGLE_BRACKET, "<<", 1, 10),
+        Token(TokenKind.INTEGER, "1", 1, 12),
+        Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>", 1, 13),
+        Token(TokenKind.EOF, null, 1, 15)
       )
     )
   }
@@ -1404,56 +1353,36 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.EPC_MULTISET_OPEN, "{{"),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.COMMA, ","),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.EPC_MULTISET_CLOSE, "}}"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.EPC_MULTISET_OPEN, "{{", 1, 1),
+        Token(TokenKind.INTEGER, "1", 1, 4),
+        Token(TokenKind.COMMA, ",", 1, 5),
+        Token(TokenKind.INTEGER, "1", 1, 7),
+        Token(TokenKind.EPC_MULTISET_CLOSE, "}}", 1, 9),
+        Token(TokenKind.EOF, null, 1, 11)
       )
     )
   }
 
   test("Recognizes EPC conditional threads") {
     val inputSpec =
-      """if 1 = 1 then 0 else 0 fi""".stripMargin
+      """if 1 = 1 then {{ }} else {{ }} fi""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.EPC_IF, "if"),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.EQ, "="),
-        Token(TokenKind.INTEGER, "1"),
-        Token(TokenKind.EPC_THEN, "then"),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.EPC_ELSE, "else"),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.EPC_FI, "fi"),
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.EPC_IF, "if", 1, 1),
+        Token(TokenKind.INTEGER, "1", 1, 4),
+        Token(TokenKind.EQ, "=", 1, 6),
+        Token(TokenKind.INTEGER, "1", 1, 8),
+        Token(TokenKind.EPC_THEN, "then", 1, 10),
+        Token(TokenKind.EPC_MULTISET_OPEN, "{{", 1, 15),
+        Token(TokenKind.EPC_MULTISET_CLOSE, "}}", 1, 18),
+        Token(TokenKind.EPC_ELSE, "else", 1, 21),
+        Token(TokenKind.EPC_MULTISET_OPEN, "{{", 1, 26),
+        Token(TokenKind.EPC_MULTISET_CLOSE, "}}", 1, 29),
+        Token(TokenKind.EPC_FI, "fi", 1, 32),
+        Token(TokenKind.EOF, null, 1, 34)
       )
     )
   }
-
-  test("Recognizes EPC thread definitions") {
-    val inputSpec =
-      """def declareXAndStop() = var x. 0""".stripMargin
-
-    val tokens = recognizeTokens(inputSpec)
-    assert(tokens ==
-      List(
-        Token(TokenKind.EPC_DEF, "def"),
-        Token(TokenKind.IDENTIFIER, "declareXAndStop"),
-        Token(TokenKind.LEFT_ROUND_BRACKET, "("),
-        Token(TokenKind.RIGHT_ROUND_BRACKET, ")"),
-        Token(TokenKind.EQ, "="),
-        Token(TokenKind.EPC_VAR, "var"),
-        Token(TokenKind.IDENTIFIER, "x"),
-        Token(TokenKind.DOT, "."),
-        Token(TokenKind.INTEGER, "0"),
-        Token(TokenKind.EOF, null)
-      )
-    )
-  }
-
 }

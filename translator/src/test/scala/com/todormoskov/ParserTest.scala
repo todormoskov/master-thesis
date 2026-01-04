@@ -75,7 +75,7 @@ class ParserTest extends AnyFunSuite {
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
     assert(ast ==
       VariableDeclaration(
-        Token(TokenKind.VARIABLES, "VARIABLES"),
+        Token(TokenKind.VARIABLES, "VARIABLES", 1, 1),
         List(Identifier("x"), Identifier("y"), Identifier("z"))
       )
     )
@@ -88,7 +88,7 @@ class ParserTest extends AnyFunSuite {
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
     assert(ast ==
       ConstantDeclaration(
-        Token(TokenKind.CONSTANTS, "CONSTANTS"),
+        Token(TokenKind.CONSTANTS, "CONSTANTS", 1, 1),
         List(
           OperatorDeclaration(Identifier("X"), Nil),
           OperatorDeclaration(Identifier("Y"), Nil),
@@ -105,14 +105,14 @@ class ParserTest extends AnyFunSuite {
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseModuleUnit().toOption.get
     assert(ast ==
       ConstantDeclaration(
-        Token(TokenKind.CONSTANTS, "CONSTANTS"),
+        Token(TokenKind.CONSTANTS, "CONSTANTS", 1, 1),
         List(
           OperatorDeclaration(
             Identifier("F"),
             List(
-              Token(TokenKind.UNDERSCORE, "_"),
-              Token(TokenKind.UNDERSCORE, "_"),
-              Token(TokenKind.UNDERSCORE, "_")
+              Token(TokenKind.UNDERSCORE, "_", 1, 13),
+              Token(TokenKind.UNDERSCORE, "_", 1, 16),
+              Token(TokenKind.UNDERSCORE, "_", 1, 19)
             )
           ),
         )
@@ -172,15 +172,15 @@ class ParserTest extends AnyFunSuite {
             OperatorDeclaration(
               Identifier("f"),
               List(
-                Token(TokenKind.UNDERSCORE, "_"),
-                Token(TokenKind.UNDERSCORE, "_")
+                Token(TokenKind.UNDERSCORE, "_", 1, 11),
+                Token(TokenKind.UNDERSCORE, "_", 1, 14)
               )
             ),
             OperatorDeclaration(
               Identifier("g"),
               List(
-                Token(TokenKind.UNDERSCORE, "_"),
-                Token(TokenKind.UNDERSCORE, "_")
+                Token(TokenKind.UNDERSCORE, "_", 1, 20),
+                Token(TokenKind.UNDERSCORE, "_", 1, 23)
               )
             ),
             Identifier("x")
@@ -367,7 +367,7 @@ class ParserTest extends AnyFunSuite {
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseAssumption().toOption.get
     assert(ast ==
       Assumption(
-        Token(TokenKind.ASSUME, "ASSUME"),
+        Token(TokenKind.ASSUME, "ASSUME", 1, 1),
         BinaryExpression(
           ">",
           Identifier("foo"),
@@ -1763,7 +1763,7 @@ class ParserTest extends AnyFunSuite {
       ExtendsStatement(Nil),
       List(
         VariableDeclaration(
-          Token(TokenKind.VARIABLE, "VARIABLE"),
+          Token(TokenKind.VARIABLE, "VARIABLE", 2, 1),
           List(Identifier("x"))
         ),
         Module(
@@ -1771,7 +1771,7 @@ class ParserTest extends AnyFunSuite {
           ExtendsStatement(Nil),
           List(
             VariableDeclaration(
-              Token(TokenKind.VARIABLE, "VARIABLE"),
+              Token(TokenKind.VARIABLE, "VARIABLE", 4, 1),
               List(Identifier("y"))
             ),
             OperatorDefinition(

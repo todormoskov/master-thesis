@@ -155,7 +155,7 @@ object Lexer {
     QUESTION_MARK,
     SEMICOLON
 
-  case class Token(kind: TokenKind, value: String)
+  case class Token(kind: TokenKind, value: String, line: Int, column : Int)
 
   final class Scanner(input: String):
     // The whole input as a single string
@@ -164,8 +164,19 @@ object Lexer {
     private var idx = 0
     // A buffer of one character
     private var buffer: Option[Char] = None
+    private var column = 0
+    private val lineBuffer = new StringBuilder
 
     def eof: Boolean = idx >= len
+
+    def getColumn: Int = column
+    def resetColumn(): Unit = column = 0
+    def getLineBuffer: String = lineBuffer.toString()
+    def clearLineBuffer(): Unit = lineBuffer.clear()
+
+    def getLine(lineNum: Int): String = {
+      chars.linesIterator.zipWithIndex.find(_._2 == lineNum - 1).map(_._1).getOrElse("")
+    }
 
     /**
      * Return the next character from input without consuming it.
@@ -191,16 +202,16 @@ object Lexer {
       } else if (!eof) {
           val c = chars.charAt(idx)
           idx += 1
+          column += 1
+          lineBuffer += c
           Some(c)
       } else None
 
   final class Tokenizer(val scanner: Scanner):
     // A buffer of tokens
     private val buffer: ListBuffer[Token] = ListBuffer.empty
-
-    // State flags
-    private var isNewLine: Boolean = true
-    private var isLogicalLine: Boolean = false
+    private var lineNum = 1
+    // State flag
     private var isEPCContext: Boolean = false
 
     /**
@@ -246,14 +257,17 @@ object Lexer {
       }
 
       var optionChar = scanner.peek()
+      val col = scanner.getColumn
       if (optionChar.isDefined) {
         var c = optionChar.get
         // Whitespace handling (including new lines)
         if (c.isWhitespace) {
           if (c == '\n' || c == '\r') {
             // Line feed and carriage return handling
-            isNewLine = true
             scanner.consume()
+            scanner.clearLineBuffer()
+            scanner.resetColumn()
+            lineNum += 1
             // Change on 28.11.2025: We start ignoring newlines,
             // and simply look for the next token (as with the other whitespace symbols)!
             // return Token(TokenKind.NEWLINE, null)
@@ -267,13 +281,13 @@ object Lexer {
         // Operators and symbols
         if (c == '+') {
           scanner.consume()
-          return Token(TokenKind.PLUS, "+")
+          return Token(TokenKind.PLUS, "+", lineNum, col)
         }
         if (c == '-') {
           scanner.consume()
           if (scanner.peek().isDefined && scanner.peek().get == '>') {
             scanner.consume()
-            return Token(TokenKind.RIGHT_ARROW, "->")
+            return Token(TokenKind.RIGHT_ARROW, "->", lineNum, col)
           }
           // Minus separator handling
           val sbValue = new StringBuilder("-")
@@ -281,13 +295,13 @@ object Lexer {
             sbValue += scanner.consume().get
           }
           if (sbValue.length >= 4) {
-            return Token(TokenKind.MINUS_SEPARATOR, sbValue.toString)
+            return Token(TokenKind.MINUS_SEPARATOR, sbValue.toString, lineNum, col)
           }
           if (sbValue.length == 1) {
-            return Token(TokenKind.MINUS, "-")
+            return Token(TokenKind.MINUS, "-", lineNum, col)
           }
           // The operators -- and --- are unknown
-          return Token(TokenKind.UNKNOWN_OPERATOR, sbValue.toString)
+          return Token(TokenKind.UNKNOWN_OPERATOR, sbValue.toString, lineNum, col)
         }
         if (c == '*') {
           scanner.consume()
@@ -299,69 +313,69 @@ object Lexer {
           if (scanner.peek().isDefined && scanner.peek().get == ')') {
             scanner.consume()
             isEPCContext = false
-            return Token(TokenKind.EPC_CONTEXT_CLOSE, "")
+            return Token(TokenKind.EPC_CONTEXT_CLOSE, "", lineNum, col)
           }
-          return Token(TokenKind.MUL, "*")
+          return Token(TokenKind.MUL, "*", lineNum, col)
         }
         if (c == '^') {
           scanner.consume()
-          return Token(TokenKind.EXP, "^")
+          return Token(TokenKind.EXP, "^", lineNum, col)
         }
         if (c == '%') {
           scanner.consume()
-          return Token(TokenKind.MOD, "%")
+          return Token(TokenKind.MOD, "%", lineNum, col)
         }
         if (c == '.') {
           scanner.consume()
           if (scanner.peek().isDefined && scanner.peek().get == '.') {
             scanner.consume()
-            return Token(TokenKind.DOT_DOT, "..")
+            return Token(TokenKind.DOT_DOT, "..", lineNum, col)
           }
-          return Token(TokenKind.DOT, ".")
+          return Token(TokenKind.DOT, ".", lineNum, col)
         }
         if (c == ':') {
           scanner.consume()
           if (scanner.peek().isDefined && scanner.peek().get == '>') {
             scanner.consume()
-            return Token(TokenKind.COLON_LT, ":>")
+            return Token(TokenKind.COLON_LT, ":>", lineNum, col)
           }
           if (scanner.peek().isDefined && scanner.peek().get == '=') {
             scanner.consume()
-            return Token(TokenKind.EPC_ASSIGN, ":=")
+            return Token(TokenKind.EPC_ASSIGN, ":=", lineNum, col)
           }
-          return Token(TokenKind.COLON, ":")
+          return Token(TokenKind.COLON, ":", lineNum, col)
         }
         if (c == ';') {
           scanner.consume()
-          return Token(TokenKind.SEMICOLON, ";")
+          return Token(TokenKind.SEMICOLON, ";", lineNum, col)
         }
         if (c == ',') {
           scanner.consume()
-          return Token(TokenKind.COMMA, ",")
+          return Token(TokenKind.COMMA, ",", lineNum, col)
         }
         if (c == '!') {
           scanner.consume()
-          return Token(TokenKind.BANG, "!")
+          return Token(TokenKind.BANG, "!", lineNum, col)
         }
         if (c == '?') {
           scanner.consume()
-          return Token(TokenKind.QUESTION_MARK, "?")
+          return Token(TokenKind.QUESTION_MARK, "?", lineNum, col)
         }
         if (c == '_') {
           scanner.consume()
-          return Token(TokenKind.UNDERSCORE, "_")
+          return Token(TokenKind.UNDERSCORE, "_", lineNum, col)
         }
         if (c == '~') {
           scanner.consume()
           if (scanner.peek().isDefined && scanner.peek().get == '>') {
             scanner.consume()
-            return Token(TokenKind.LEADS_TO, "~>")
+            return Token(TokenKind.LEADS_TO, "~>", lineNum, col)
           }
-          return Token(TokenKind.NOT, "~")
+          return Token(TokenKind.NOT, "~", lineNum, col)
         }
         if (c == '\'') {
           scanner.consume()
-          return Token(TokenKind.PRIME, "'")
+          return Token(TokenKind.PRIME, "'", lineNum, col)
         }
         // '(' or '(*' ... '*)' comments
         if (c == '(') {
@@ -371,6 +385,12 @@ object Lexer {
             // Throw away all characters before the next '*)'
             val sbValue = new StringBuilder
             while (scanner.peek().isDefined && !sbValue.endsWith("*)")) {
+              // Line feed and carriage return handling
+              if (scanner.peek().get == '\n' || scanner.peek().get == '\r') {
+                scanner.clearLineBuffer()
+                scanner.resetColumn()
+                lineNum += 1
+              }
               sbValue += scanner.consume().get
               optionChar = scanner.peek()
 
@@ -382,7 +402,7 @@ object Lexer {
               // EPC context and the current comment.
               if (sbValue.endsWith("--EPC")) {
                 isEPCContext = true
-                return Token(TokenKind.EPC_CONTEXT_OPEN, "--EPC")
+                return Token(TokenKind.EPC_CONTEXT_OPEN, "--EPC", lineNum, col)
               }
             }
             return consume(keepBuffer = true)
@@ -391,59 +411,59 @@ object Lexer {
             scanner.consume()
             if (scanner.peek().isDefined && scanner.peek().get == ')') {
               scanner.consume()
-              return Token(TokenKind.OPLUS, "(+)")
+              return Token(TokenKind.OPLUS, "(+)", lineNum, col)
             }
-            return Token(TokenKind.UNKNOWN_OPERATOR, "(+")
+            return Token(TokenKind.UNKNOWN_OPERATOR, "(+", lineNum, col)
           }
           if (scanner.peek().isDefined && scanner.peek().get == '-') {
             scanner.consume()
             if (scanner.peek().isDefined && scanner.peek().get == ')') {
               scanner.consume()
-              return Token(TokenKind.OMINUS, "(-)")
+              return Token(TokenKind.OMINUS, "(-)", lineNum, col)
             }
-            return Token(TokenKind.UNKNOWN_OPERATOR, "(-")
+            return Token(TokenKind.UNKNOWN_OPERATOR, "(-", lineNum, col)
           }
-          return Token(TokenKind.LEFT_ROUND_BRACKET, "(")
+          return Token(TokenKind.LEFT_ROUND_BRACKET, "(", lineNum, col)
         }
         if (c == ')') {
           scanner.consume()
-          return Token(TokenKind.RIGHT_ROUND_BRACKET, ")")
+          return Token(TokenKind.RIGHT_ROUND_BRACKET, ")", lineNum, col)
         }
         if (c == '[') {
           scanner.consume()
           if (scanner.peek().isDefined && scanner.peek().get == ']') {
             scanner.consume()
-            return Token(TokenKind.SQUARE, "[]")
+            return Token(TokenKind.SQUARE, "[]", lineNum, col)
           }
           if (scanner.peek().isDefined && scanner.peek().get == '[') {
             scanner.consume()
-            return Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[[")
+            return Token(TokenKind.EPC_LOC_SCOPE_OPEN, "[[", lineNum, col)
           }
-          return Token(TokenKind.LEFT_SQUARE_BRACKET, "[")
+          return Token(TokenKind.LEFT_SQUARE_BRACKET, "[", lineNum, col)
         }
         if (c == ']') {
           scanner.consume()
           if (scanner.peek().isDefined && scanner.peek().get == ']') {
             scanner.consume()
-            return Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]")
+            return Token(TokenKind.EPC_LOC_SCOPE_CLOSE, "]]", lineNum, col)
           }
-          return Token(TokenKind.RIGHT_SQUARE_BRACKET, "]")
+          return Token(TokenKind.RIGHT_SQUARE_BRACKET, "]", lineNum, col)
         }
         if (c == '{') {
           scanner.consume()
           if (scanner.peek().isDefined && scanner.peek().get == '{') {
             scanner.consume()
-            return Token(TokenKind.EPC_MULTISET_OPEN, "{{")
+            return Token(TokenKind.EPC_MULTISET_OPEN, "{{", lineNum, col)
           }
-          return Token(TokenKind.LEFT_CURLY_BRACKET, "{")
+          return Token(TokenKind.LEFT_CURLY_BRACKET, "{", lineNum, col)
         }
         if (c == '}') {
           scanner.consume()
           if (scanner.peek().isDefined && scanner.peek().get == '}') {
             scanner.consume()
-            return Token(TokenKind.EPC_MULTISET_CLOSE, "}}")
+            return Token(TokenKind.EPC_MULTISET_CLOSE, "}}", lineNum, col)
           }
-          return Token(TokenKind.RIGHT_CURLY_BRACKET, "}")
+          return Token(TokenKind.RIGHT_CURLY_BRACKET, "}", lineNum, col)
         }
         if (c == '=') {
           scanner.consume()
@@ -455,67 +475,67 @@ object Lexer {
               sbValue += scanner.consume().get
             }
             if (sbValue.length >= 4) {
-              return Token(TokenKind.EQUAL_SEPARATOR, sbValue.toString)
+              return Token(TokenKind.EQUAL_SEPARATOR, sbValue.toString, lineNum, col)
             }
             if (sbValue.length == 2) {
-              return Token(TokenKind.DEFINE, "==")
+              return Token(TokenKind.DEFINE, "==", lineNum, col)
             }
             // === is unknown
-            return Token(TokenKind.UNKNOWN_OPERATOR, sbValue.toString)
+            return Token(TokenKind.UNKNOWN_OPERATOR, sbValue.toString, lineNum, col)
           }
           if (scanner.peek().isDefined && scanner.peek().get == '>') {
             scanner.consume()
-            return Token(TokenKind.IMPLICATION, "=>")
+            return Token(TokenKind.IMPLICATION, "=>", lineNum, col)
           }
           if (scanner.peek().isDefined && scanner.peek().get == '<') {
             scanner.consume()
-            return Token(TokenKind.LE, "=<")
+            return Token(TokenKind.LE, "=<", lineNum, col)
           }
-          return Token(TokenKind.EQ, "=")
+          return Token(TokenKind.EQ, "=", lineNum, col)
         }
         if (c == '#') {
           scanner.consume()
-          return Token(TokenKind.NEQ, "#")
+          return Token(TokenKind.NEQ, "#", lineNum, col)
         }
         if (c == '<') {
           scanner.consume()
           if (scanner.peek().isDefined && scanner.peek().get == '-') {
             scanner.consume()
-            return Token(TokenKind.LEFT_ARROW, "<-")
+            return Token(TokenKind.LEFT_ARROW, "<-", lineNum, col)
           }
           if (scanner.peek().isDefined && scanner.peek().get == '=') {
             scanner.consume()
             if (scanner.peek().isDefined && scanner.peek().get == '>') {
               scanner.consume()
-              return Token(TokenKind.EQUIVALENCE, "<=>")
+              return Token(TokenKind.EQUIVALENCE, "<=>", lineNum, col)
             }
-            return Token(TokenKind.LE, "<=")
+            return Token(TokenKind.LE, "<=", lineNum, col)
           }
           if (scanner.peek().isDefined && scanner.peek().get == '<') {
             scanner.consume()
-            return Token(TokenKind.LEFT_ANGLE_BRACKET, "<<")
+            return Token(TokenKind.LEFT_ANGLE_BRACKET, "<<", lineNum, col)
           }
           if (scanner.peek().isDefined && scanner.peek().get == '>') {
             scanner.consume()
-            return Token(TokenKind.DIAMOND, "<>")
+            return Token(TokenKind.DIAMOND, "<>", lineNum, col)
           }
           if (scanner.peek().isDefined && scanner.peek().get == '|') {
             scanner.consume()
-            return Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|")
+            return Token(TokenKind.EPC_LOC_MEMORY_CODE_SEP, "<|", lineNum, col)
           }
-          return Token(TokenKind.LT, "<")
+          return Token(TokenKind.LT, "<", lineNum, col)
         }
         if (c == '>') {
           scanner.consume()
           if (scanner.peek().isDefined && scanner.peek().get == '>') {
             scanner.consume()
-            return Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>")
+            return Token(TokenKind.RIGHT_ANGLE_BRACKET, ">>", lineNum, col)
           }
           if (scanner.peek().isDefined && scanner.peek().get == '=') {
             scanner.consume()
-            return Token(TokenKind.GE, ">=")
+            return Token(TokenKind.GE, ">=", lineNum, col)
           }
-          return Token(TokenKind.GT, ">")
+          return Token(TokenKind.GT, ">", lineNum, col)
         }
         if (c == '|') {
           scanner.consume()
@@ -523,27 +543,27 @@ object Lexer {
             scanner.consume()
             if (scanner.peek().isDefined && scanner.peek().get == '>') {
               scanner.consume()
-              return Token(TokenKind.MAPS_TO, "|->")
+              return Token(TokenKind.MAPS_TO, "|->", lineNum, col)
             }
-            return Token(TokenKind.UNKNOWN_OPERATOR, "|-")
+            return Token(TokenKind.UNKNOWN_OPERATOR, "|-", lineNum, col)
           }
           if (scanner.peek().isDefined && scanner.peek().get == '|') {
             scanner.consume()
-            return Token(TokenKind.EPC_LOC_COMPOSITION, "||")
+            return Token(TokenKind.EPC_LOC_COMPOSITION, "||", lineNum, col)
           }
-          return Token(TokenKind.EPC_THREAD_COMPOSITION, "|")
+          return Token(TokenKind.EPC_THREAD_COMPOSITION, "|", lineNum, col)
         }
         if (c == '/') {
           scanner.consume()
           if (scanner.peek().isDefined && scanner.peek().get == '\\') {
             scanner.consume()
-            return Token(TokenKind.AND, "/\\")
+            return Token(TokenKind.AND, "/\\", lineNum, col)
           }
           if (scanner.peek().isDefined && scanner.peek().get == '=') {
             scanner.consume()
-            return Token(TokenKind.NEQ, "/=")
+            return Token(TokenKind.NEQ, "/=", lineNum, col)
           }
-          return Token(TokenKind.DIV, "/")
+          return Token(TokenKind.DIV, "/", lineNum, col)
         }
         // One-line comment \* or \/ or symbol starting with \ (\A, \E, \in, ...)
         if (c == '\\') {
@@ -564,7 +584,7 @@ object Lexer {
           // \/ handling
           if (optionChar.isDefined && optionChar.get == '/') {
             scanner.consume()
-            return Token(TokenKind.OR, "\\/")
+            return Token(TokenKind.OR, "\\/", lineNum, col)
           }
           // Symbol starting with \
           while (optionChar.isDefined && optionChar.get.isLetter) {
@@ -573,38 +593,38 @@ object Lexer {
           }
           val name = sbName.toString
           return name match {
-            case "\\land" => Token(TokenKind.AND, name)
-            case "\\lor" => Token(TokenKind.OR, name)
-            case "\\lnot" => Token(TokenKind.NOT, name)
-            case "\\neg" => Token(TokenKind.NOT, name)
-            case "\\equiv" => Token(TokenKind.EQUIVALENCE, name)
-            case "\\A" => Token(TokenKind.FORALL, name)
-            case "\\E" => Token(TokenKind.EXISTS, name)
-            case "\\in" => Token(TokenKind.SET_IN, name)
-            case "\\notin" => Token(TokenKind.NOTIN, name)
-            case "\\cup" => Token(TokenKind.UNION, name)
-            case "\\union" => Token(TokenKind.UNION, name)
-            case "\\cap" => Token(TokenKind.INTERSECT, name)
-            case "\\intersect" => Token(TokenKind.INTERSECT, name)
-            case "\\subset" => Token(TokenKind.SUBSET, name)
-            case "\\" => Token(TokenKind.SET_DIFFERENCE, name)
-            case "\\X" => Token(TokenKind.TIMES, name)
-            case "\\times" => Token(TokenKind.TIMES, name)
-            case "\\o" => Token(TokenKind.CIRCLE, name)
-            case "\\circ" => Token(TokenKind.CIRCLE, name)
-            case "\\oplus" => Token(TokenKind.OPLUS, name)
-            case "\\ominus" => Token(TokenKind.OMINUS, name)
-            case "\\sqsubseteq" => Token(TokenKind.SQSUBSETEQ, name)
-            case default => Token(TokenKind.BACKSLASH_OPERATOR, name)
+            case "\\land" => Token(TokenKind.AND, name, lineNum, col)
+            case "\\lor" => Token(TokenKind.OR, name, lineNum, col)
+            case "\\lnot" => Token(TokenKind.NOT, name, lineNum, col)
+            case "\\neg" => Token(TokenKind.NOT, name, lineNum, col)
+            case "\\equiv" => Token(TokenKind.EQUIVALENCE, name, lineNum, col)
+            case "\\A" => Token(TokenKind.FORALL, name, lineNum, col)
+            case "\\E" => Token(TokenKind.EXISTS, name, lineNum, col)
+            case "\\in" => Token(TokenKind.SET_IN, name, lineNum, col)
+            case "\\notin" => Token(TokenKind.NOTIN, name, lineNum, col)
+            case "\\cup" => Token(TokenKind.UNION, name, lineNum, col)
+            case "\\union" => Token(TokenKind.UNION, name, lineNum, col)
+            case "\\cap" => Token(TokenKind.INTERSECT, name, lineNum, col)
+            case "\\intersect" => Token(TokenKind.INTERSECT, name, lineNum, col)
+            case "\\subset" => Token(TokenKind.SUBSET, name, lineNum, col)
+            case "\\" => Token(TokenKind.SET_DIFFERENCE, name, lineNum, col)
+            case "\\X" => Token(TokenKind.TIMES, name, lineNum, col)
+            case "\\times" => Token(TokenKind.TIMES, name, lineNum, col)
+            case "\\o" => Token(TokenKind.CIRCLE, name, lineNum, col)
+            case "\\circ" => Token(TokenKind.CIRCLE, name, lineNum, col)
+            case "\\oplus" => Token(TokenKind.OPLUS, name, lineNum, col)
+            case "\\ominus" => Token(TokenKind.OMINUS, name, lineNum, col)
+            case "\\sqsubseteq" => Token(TokenKind.SQSUBSETEQ, name, lineNum, col)
+            case default => Token(TokenKind.BACKSLASH_OPERATOR, name, lineNum, col)
           }
         }
         if (c == '@') {
           scanner.consume()
           if (scanner.peek().isDefined && scanner.peek().get == '@') {
             scanner.consume()
-            return Token(TokenKind.AT_AT, "@@")
+            return Token(TokenKind.AT_AT, "@@", lineNum, col)
           }
-          return Token(TokenKind.AT, "@")
+          return Token(TokenKind.AT, "@", lineNum, col)
         }
         // Identifier: [a-zA-Z_][a-zA-Z0-9_]*
         if (c.isLetter || c == '_') {
@@ -621,54 +641,54 @@ object Lexer {
           val name = sbName.toString
           return name match {
             // Module-Level Constructs
-            case "MODULE" => Token(TokenKind.MODULE, name)
-            case "EXTENDS" => Token(TokenKind.EXTENDS, name)
-            case "CONSTANT" => Token(TokenKind.CONSTANT, name)
-            case "CONSTANTS" => Token(TokenKind.CONSTANTS, name)
-            case "VARIABLE" => Token(TokenKind.VARIABLE, name)
-            case "VARIABLES" => Token(TokenKind.VARIABLES, name)
-            case "ASSUME" => Token(TokenKind.ASSUME, name)
-            case "INSTANCE" => Token(TokenKind.INSTANCE, name)
-            case "WITH" => Token(TokenKind.WITH, name)
-            case "THEOREM" => Token(TokenKind.THEOREM, name)
-            case "LOCAL" => Token(TokenKind.LOCAL, name)
+            case "MODULE" => Token(TokenKind.MODULE, name, lineNum, col)
+            case "EXTENDS" => Token(TokenKind.EXTENDS, name, lineNum, col)
+            case "CONSTANT" => Token(TokenKind.CONSTANT, name, lineNum, col)
+            case "CONSTANTS" => Token(TokenKind.CONSTANTS, name, lineNum, col)
+            case "VARIABLE" => Token(TokenKind.VARIABLE, name, lineNum, col)
+            case "VARIABLES" => Token(TokenKind.VARIABLES, name, lineNum, col)
+            case "ASSUME" => Token(TokenKind.ASSUME, name, lineNum, col)
+            case "INSTANCE" => Token(TokenKind.INSTANCE, name, lineNum, col)
+            case "WITH" => Token(TokenKind.WITH, name, lineNum, col)
+            case "THEOREM" => Token(TokenKind.THEOREM, name, lineNum, col)
+            case "LOCAL" => Token(TokenKind.LOCAL, name, lineNum, col)
             // Logical operators
-            case "TRUE" => Token(TokenKind.TRUE, name)
-            case "FALSE" => Token(TokenKind.FALSE, name)
-            case "BOOLEAN" => Token(TokenKind.BOOLEAN, name)
-            case "CHOOSE" => Token(TokenKind.CHOOSE, name)
+            case "TRUE" => Token(TokenKind.TRUE, name, lineNum, col)
+            case "FALSE" => Token(TokenKind.FALSE, name, lineNum, col)
+            case "BOOLEAN" => Token(TokenKind.BOOLEAN, name, lineNum, col)
+            case "CHOOSE" => Token(TokenKind.CHOOSE, name, lineNum, col)
             // Set operators
-            case "SUBSET" => Token(TokenKind.BIG_SUBSET, name)
-            case "UNION" => Token(TokenKind.BIG_UNION, name)
+            case "SUBSET" => Token(TokenKind.BIG_SUBSET, name, lineNum, col)
+            case "UNION" => Token(TokenKind.BIG_UNION, name, lineNum, col)
             // Functions
-            case "DOMAIN" => Token(TokenKind.DOMAIN, name)
-            case "EXCEPT" => Token(TokenKind.EXCEPT, name)
+            case "DOMAIN" => Token(TokenKind.DOMAIN, name, lineNum, col)
+            case "EXCEPT" => Token(TokenKind.EXCEPT, name, lineNum, col)
             // Miscellaneous constructs
-            case "IF" => Token(TokenKind.IF, name)
-            case "THEN" => Token(TokenKind.THEN, name)
-            case "ELSE" => Token(TokenKind.ELSE, name)
-            case "CASE" => Token(TokenKind.CASE, name)
-            case "OTHER" => Token(TokenKind.OTHER, name)
-            case "LET" => Token(TokenKind.LET, name)
-            case "IN" => Token(TokenKind.IN, name)
+            case "IF" => Token(TokenKind.IF, name, lineNum, col)
+            case "THEN" => Token(TokenKind.THEN, name, lineNum, col)
+            case "ELSE" => Token(TokenKind.ELSE, name, lineNum, col)
+            case "CASE" => Token(TokenKind.CASE, name, lineNum, col)
+            case "OTHER" => Token(TokenKind.OTHER, name, lineNum, col)
+            case "LET" => Token(TokenKind.LET, name, lineNum, col)
+            case "IN" => Token(TokenKind.IN, name, lineNum, col)
             // Actions
-            case "ENABLED" => Token(TokenKind.ENABLED, name)
-            case "UNCHANGED" => Token(TokenKind.UNCHANGED, name)
+            case "ENABLED" => Token(TokenKind.ENABLED, name, lineNum, col)
+            case "UNCHANGED" => Token(TokenKind.UNCHANGED, name, lineNum, col)
             // Temporal operators
-            case "WF" => Token(TokenKind.WF, name)
-            case "SF" => Token(TokenKind.SF, name)
+            case "WF" => Token(TokenKind.WF, name, lineNum, col)
+            case "SF" => Token(TokenKind.SF, name, lineNum, col)
             // EPC operators
-            case "var" => Token(TokenKind.EPC_VAR, name)
-            case "new" => Token(TokenKind.EPC_NEW, name)
-            case "if" => Token(TokenKind.EPC_IF, name)
-            case "then" => Token(TokenKind.EPC_THEN, name)
-            case "else" => Token(TokenKind.EPC_ELSE, name)
-            case "fi" => Token(TokenKind.EPC_FI, name)
-            case "def" => Token(TokenKind.EPC_DEF, name)
+            case "var" => Token(TokenKind.EPC_VAR, name, lineNum, col)
+            case "new" => Token(TokenKind.EPC_NEW, name, lineNum, col)
+            case "if" => Token(TokenKind.EPC_IF, name, lineNum, col)
+            case "then" => Token(TokenKind.EPC_THEN, name, lineNum, col)
+            case "else" => Token(TokenKind.EPC_ELSE, name, lineNum, col)
+            case "fi" => Token(TokenKind.EPC_FI, name, lineNum, col)
+            case "def" => Token(TokenKind.EPC_DEF, name, lineNum, col)
             // case "Undefined" => Token(TokenKind.EPC_UNDEFINED, name)
             // case "Initialized" => Token(TokenKind.EPC_INITIALIZED, name)
             // Identifier
-            case default => Token(TokenKind.IDENTIFIER, name)
+            case default => Token(TokenKind.IDENTIFIER, name, lineNum, col)
           }
         }
         // Number: [0-9]+
@@ -681,7 +701,7 @@ object Lexer {
             optionChar = scanner.peek()
           }
           val value = sbValue.toString
-          return Token(TokenKind.INTEGER, value)
+          return Token(TokenKind.INTEGER, value, lineNum, col)
         }
         // String
         if (c == '"') {
@@ -694,12 +714,12 @@ object Lexer {
           }
           scanner.consume()
           val value = sbValue.toString
-          return Token(TokenKind.STRING, value)
+          return Token(TokenKind.STRING, value, lineNum, col)
         }
-        Token(TokenKind.UNKNOWN_OPERATOR, c.toString)
+        Token(TokenKind.UNKNOWN_OPERATOR, c.toString, lineNum, col)
       } else {
         // End of file
-        Token(TokenKind.EOF, null)
+        Token(TokenKind.EOF, null, lineNum, col + 1)
       }
     }
 }

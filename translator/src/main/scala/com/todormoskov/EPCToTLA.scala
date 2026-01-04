@@ -10,7 +10,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
 
   def translateSpec(): TLAStringBuilder = {
     // We add the constants Undefined and Initialized.
-    val constants = ConstantDeclaration(Token(TokenKind.CONSTANTS, "CONSTANTS"),
+    val constants = ConstantDeclaration(Token(TokenKind.CONSTANTS, "CONSTANTS", -1, -1),
       List(OperatorDeclaration(Identifier("Undefined"), Nil), OperatorDeclaration(Identifier("Initialized"), Nil)))
     tlaStringBuilder.appendUnit(constants, newlines = 2)
 
@@ -24,7 +24,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     val raOption = Option.when(epcCtx.thdDefinitionsToOperations.nonEmpty)(Identifier("ra"))
     val OOption = Option.when(epcCtx.specWithMultiSends)(Identifier("O"))
     val allTLAVariables =  List(pc) ++ raOption ++ OOption ++ locationVariables ++ declaredChannels
-    val variablesDeclaration = VariableDeclaration(Token(TokenKind.VARIABLES, "VARIABLES"), allTLAVariables)
+    val variablesDeclaration = VariableDeclaration(Token(TokenKind.VARIABLES, "VARIABLES", -1, -1), allTLAVariables)
     tlaStringBuilder.appendUnit(variablesDeclaration, newlines = 2)
 
     // We also add the operator vars == << ... >>, which is a list with all variables.

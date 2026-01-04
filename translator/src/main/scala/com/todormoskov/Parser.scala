@@ -440,47 +440,6 @@ case class ThreadComprehension(enumerator: Enumerator, body: Thread) extends Out
  * E.g. (j = 1) (<< x := j >>) | (k = 2) (<< x := k >>)
  */
 case class ThreadComposition(lhs: OuterThread, rhs: OuterThread) extends OuterThread
-
-
-
-///**
-// * Guard := EmptyProcess | ActionPrefix
-// */
-//sealed trait Guard extends Thread
-///**
-// * EmptyProcess := '0'
-// */
-//case class EmptyProcess() extends Guard
-///**
-// * ActionPrefix := Action '.' Thread
-// *
-// * E.g. var x . << x := 10 >> . 0
-// */
-//case class ActionPrefix(action: Action, continuation: Thread) extends Guard
-///**
-// * Thread := Guard | ConditionalThread | ThreadInstantiation | ThreadComposition
-// */
-//trait Thread extends AST
-///**
-// * ConditionalThread := 'if' Expression 'then' Thread 'else' Thread
-// *
-// * E.g. if ... then ... else ...
-// */
-//case class ConditionalThread(cond: Expression, thenThread: Thread, elseThread: Thread) extends Thread
-///**
-// * ThreadInstantiation := Identifier'()'
-// *
-// * E.g. foo(), bar()
-// */
-//case class ThreadInstantiation(thread: Identifier) extends Thread
-///**
-// * ThreadComposition := Thread | Thread
-// *
-// * E.g. var x . 0 | var y . 0
-// */
-//case class ThreadComposition(lhs: Thread, rhs: Thread) extends Thread
-
-
 /**
  * ThreadDefinition := 'def' Identifier [ '(' CommaList(Identifier) ')' ] ? '=' Thread
  *
@@ -555,8 +514,21 @@ class Parser(lexer: Tokenizer) {
   def consume(expected: TokenKind) : Either[String, Token] =
     if check(expected)
       then Right(lexer.consume())
-      else Left(s"Syntax error: token of kind $expected not found!")
-  
+      else Left(error(s"token of kind $expected not found"))
+
+  private def error(token: Token, message: String): String = {
+    val lineContents = lexer.scanner.getLine(token.line)
+    s"""SyntaxError (line ${token.line}, column ${token.column}): ${message}.
+       |>>> ${lineContents}
+       |>>> ${"-".repeat(token.column - 1)}^
+       |""".stripMargin
+  }
+
+  private def error(message: String): String = {
+    val token = lexer.peek().asInstanceOf[Token]
+    error(token, message)
+  }
+
   /**
    * Parses a comma-separated list of objects (identifiers, expressions, ...).
    *
@@ -654,7 +626,7 @@ class Parser(lexer: Tokenizer) {
    */
   private def checkModuleUnitFirstSet(): Boolean =
     lexer.peek() match {
-      case Token(kind, value) if moduleUnitFirstSet contains kind => true
+      case Token(kind, value, _, _) if moduleUnitFirstSet contains kind => true
       case _ => false
     }
 
@@ -675,19 +647,19 @@ class Parser(lexer: Tokenizer) {
    */
   def parseModuleUnit(): Either[String, ModuleUnit] =
     lexer.peek() match {
-      case Token(TokenKind.VARIABLE, _) => parseVariableDeclaration()
-      case Token(TokenKind.VARIABLES, _) => parseVariableDeclaration()
-      case Token(TokenKind.CONSTANT, _) => parseConstantDeclaration()
-      case Token(TokenKind.CONSTANTS, _) => parseConstantDeclaration()
-      case Token(TokenKind.LOCAL, _) => parseLocalDefinition()
-      case Token(TokenKind.IDENTIFIER, _) => parseDefinition()
-      case Token(TokenKind.INSTANCE, _) => parseInstance()
-      case Token(TokenKind.ASSUME, _) => parseAssumption()
-      case Token(TokenKind.THEOREM, _) => parseTheorem()
-      case Token(TokenKind.MINUS_SEPARATOR, _) => parseNestedModuleOrSeparator()
+      case Token(TokenKind.VARIABLE, _, _, _) => parseVariableDeclaration()
+      case Token(TokenKind.VARIABLES, _, _, _) => parseVariableDeclaration()
+      case Token(TokenKind.CONSTANT, _, _, _) => parseConstantDeclaration()
+      case Token(TokenKind.CONSTANTS, _, _, _) => parseConstantDeclaration()
+      case Token(TokenKind.LOCAL, _, _, _) => parseLocalDefinition()
+      case Token(TokenKind.IDENTIFIER, _, _, _) => parseDefinition()
+      case Token(TokenKind.INSTANCE, _, _, _) => parseInstance()
+      case Token(TokenKind.ASSUME, _, _, _) => parseAssumption()
+      case Token(TokenKind.THEOREM, _, _, _) => parseTheorem()
+      case Token(TokenKind.MINUS_SEPARATOR, _, _, _) => parseNestedModuleOrSeparator()
       // Here we also treat EPC specs as module units!!!
-      case Token(TokenKind.EPC_CONTEXT_OPEN, _) => parseEPCSpec()
-      case _ => Left("Syntax Error: Module unit expected")
+      case Token(TokenKind.EPC_CONTEXT_OPEN, _, _, _) => parseEPCSpec()
+      case _ => Left(error("Module unit expected"))
     }
 
   /**
@@ -732,12 +704,12 @@ class Parser(lexer: Tokenizer) {
    */
   private def parseDefinition(): Either[String, OperatorDefinition | FunctionDefinition | Instance | ModuleDefinition] =
     lexer.peek() match {
-      case Token(TokenKind.IDENTIFIER, _) =>
+      case Token(TokenKind.IDENTIFIER, _, _, _) =>
         if check(List(TokenKind.IDENTIFIER, TokenKind.LEFT_SQUARE_BRACKET))
         then parseFunctionDefinition()
         else parseOperatorDefinitionOrModuleDefinition()
-      case Token(TokenKind.INSTANCE, _) => parseInstance()
-      case _ => Left("Syntax Error: Definition expected")
+      case Token(TokenKind.INSTANCE, _, _, _) => parseInstance()
+      case _ => Left(error("Definition expected"))
     }
 
   /**
@@ -779,14 +751,14 @@ class Parser(lexer: Tokenizer) {
    */
   private def parseOperatorDeclaration(): Either[String, OperatorDeclaration] =
     for {
-      identifier <- consume(TokenKind.IDENTIFIER)
+      identifier <- parseIdentifier()
       args <- if check(TokenKind.LEFT_ROUND_BRACKET) then for {
         _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
         args <- parseCommaListOfUnderscoreTokens()
         _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
       } yield args
       else Right(Nil)
-    } yield OperatorDeclaration(Identifier(identifier.value), args)
+    } yield OperatorDeclaration(identifier, args)
 
   /**
    * Parse a comma-separated list of underscore tokens.
@@ -991,7 +963,7 @@ class Parser(lexer: Tokenizer) {
     finalResult <- {
       def loop(lhs: Expression): Either[String, Expression] =
         lexer.peek() match {
-          case Token(kind, value) if kind == TokenKind.IMPLICATION => for {
+          case Token(kind, value, _, _) if kind == TokenKind.IMPLICATION => for {
             _ <- consume(kind)
             rhs <- parseEquivalence()
             intermediateResult <- loop(BinaryExpression(value, lhs, rhs))
@@ -1016,7 +988,7 @@ class Parser(lexer: Tokenizer) {
     finalResult <- {
       def loop(lhs: Expression): Either[String, Expression] =
         lexer.peek() match {
-          case Token(kind, value) if kind == TokenKind.EQUIVALENCE => for {
+          case Token(kind, value, _, _) if kind == TokenKind.EQUIVALENCE => for {
             _ <- consume(kind)
             rhs <- parseConjunctionOrDisjunction()
             intermediateResult <- loop(BinaryExpression(value, lhs, rhs))
@@ -1041,7 +1013,7 @@ class Parser(lexer: Tokenizer) {
     finalResult <- {
       def loop(lhs: Expression): Either[String, Expression] =
         lexer.peek() match {
-          case Token(kind, value) if kind == TokenKind.AND || kind == TokenKind.OR => for {
+          case Token(kind, value, _, _) if kind == TokenKind.AND || kind == TokenKind.OR => for {
             _ <- consume(kind)
             rhs <- parsePrefixOperatorsWithPrecedenceRange4()
             intermediateResult <- loop(BinaryExpression(value, lhs, rhs))
@@ -1070,7 +1042,7 @@ class Parser(lexer: Tokenizer) {
    */
   private def parsePrefixOperatorsWithPrecedenceRange4(): Either[String, Expression] =
     lexer.peek() match {
-      case Token(kind, value) if prefixOperatorsWithPrecedenceRange4 contains kind => for {
+      case Token(kind, value, _, _) if prefixOperatorsWithPrecedenceRange4 contains kind => for {
         _ <- consume(kind)
         innerExpression <- parsePrefixOperatorsWithPrecedenceRange4()
       } yield UnaryExpression(value, innerExpression)
@@ -1096,7 +1068,7 @@ class Parser(lexer: Tokenizer) {
     finalResult <- {
       def loop(lhs: Expression): Either[String, Expression] =
         lexer.peek() match {
-          case Token(kind, value) if relationalTokens contains kind => for {
+          case Token(kind, value, _, _) if relationalTokens contains kind => for {
             _ <- consume(kind)
             rhs <- parseSubsetOrUnionExpression()
             intermediateResult <- loop(BinaryExpression(value, lhs, rhs))
@@ -1240,7 +1212,7 @@ class Parser(lexer: Tokenizer) {
     finalResult <- {
       def loop(lhs: Expression): Either[String, Expression] =
         lexer.peek() match {
-          case Token(kind, value) if multiplicativeTokens contains kind => for {
+          case Token(kind, value, _, _) if multiplicativeTokens contains kind => for {
             _ <- consume(kind)
             rhs <- parseUnaryMinusExpression()
             intermediateResult <- loop(BinaryExpression(value, lhs, rhs))
@@ -1432,7 +1404,7 @@ class Parser(lexer: Tokenizer) {
       then for _ <- consume(TokenKind.AT) yield AtSign()
     else if check(TokenKind.CASE)
       then for caseExpr <- parseCaseExpression() yield caseExpr
-    else Left("Syntax Error: Expression expected!")
+    else Left(error("TLA+ Expression expected"))
 
   /**
    * Parse a general identifier and then "simplify" it.
@@ -1495,7 +1467,7 @@ class Parser(lexer: Tokenizer) {
    */
   private def parseInstancePrefixPartOrIdentifierApplicationOrIdentifier(): Either[String, AST] = {
     for {
-      identifierToken <- consume(TokenKind.IDENTIFIER)
+      identifier <- parseIdentifier()
       args <- if check(TokenKind.LEFT_ROUND_BRACKET) then for {
           _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
           args <- parseCommaListOfExpressions()
@@ -1504,11 +1476,11 @@ class Parser(lexer: Tokenizer) {
         else Right(Nil)
       result <- check(TokenKind.BANG) match {
         // If we see the ! symbol, we know that this is an InstancePrefixPart.
-        case true => for _ <- consume(TokenKind.BANG) yield InstancePrefixPart(Identifier(identifierToken.value), args)
+        case true => for _ <- consume(TokenKind.BANG) yield InstancePrefixPart(identifier, args)
         // If we don't see the ! symbol and the arguments list is not empty, we know that this is an IdentifierApplication.
-        case false if args != Nil => Right(IdentifierApplication(Identifier(identifierToken.value), args))
+        case false if args != Nil => Right(IdentifierApplication(identifier, args))
         // If we don't see the ! symbol and the arguments list is empty, we know that his is an Identifier.
-        case false => Right(Identifier(identifierToken.value))
+        case false => Right(identifier)
       }
     } yield result
   }
@@ -1561,7 +1533,7 @@ class Parser(lexer: Tokenizer) {
     then for token <- consume(TokenKind.INTEGER) yield Literal(Integer.valueOf(token.value))
     else if check(TokenKind.STRING)
     then for token <- consume(TokenKind.STRING) yield Literal(token.value)
-    else Left("Error: Literal not recognized")
+    else Left(error("Literal not recognized"))
   }
 
   /**
@@ -1726,7 +1698,7 @@ class Parser(lexer: Tokenizer) {
       then parseIdentifier()
     else if check(TokenKind.LEFT_ANGLE_BRACKET)
       then parseIdentifierTuple()
-    else Left("Syntax Error: Identifier or tuple not recognized.")
+    else Left(error("Identifier or tuple not recognized"))
 
   /**
    * Check if the next tokens are part of a quantifier bound.
@@ -1896,7 +1868,7 @@ class Parser(lexer: Tokenizer) {
                 } yield ExplicitFunction(List(Mapping(identifier, secondExpression)) ++ tailMappings)
               // If we reach this point, we can not recognize the function,
               // so we throw an error.
-              case default => Left("Syntax Error: Function not recognized")
+              case default => Left(error("Function not recognized"))
             }
           }
         } yield result
@@ -2134,8 +2106,8 @@ class Parser(lexer: Tokenizer) {
    */
   private def parseEPCSpecUnit(): Either[String, EPCSpecUnit] =
     lexer.peek() match {
-      case Token(TokenKind.EPC_NEW, _) => parseChannelDefinition()
-      case Token(TokenKind.EPC_DEF, _) => parseThreadDefinition()
+      case Token(TokenKind.EPC_NEW, _, _, _) => parseChannelDefinition()
+      case Token(TokenKind.EPC_DEF, _, _, _) => parseThreadDefinition()
       case _ => parseNetwork()
     }
 
@@ -2320,7 +2292,7 @@ class Parser(lexer: Tokenizer) {
           then parseReceive()
         else if check(TokenKind.EPC_MULTISET_OPEN)
           then parseSend()
-        else Left("Syntax error: action expected!")
+        else Left(error("EPC action expected"))
     } yield action
 
   /**
@@ -2399,13 +2371,13 @@ class Parser(lexer: Tokenizer) {
       then parseThreadInstantiation()
     else lexer.peek() match {
       // Actions
-      case Token(TokenKind.EPC_VAR, _) => parseAction()
-      case Token(TokenKind.LEFT_ANGLE_BRACKET, _) => parseAction()
-      case Token(TokenKind.IDENTIFIER, _) => parseAction()
-      case Token(TokenKind.EPC_MULTISET_OPEN, _) => parseAction()
+      case Token(TokenKind.EPC_VAR, _, _, _) => parseAction()
+      case Token(TokenKind.LEFT_ANGLE_BRACKET, _, _, _) => parseAction()
+      case Token(TokenKind.IDENTIFIER, _, _, _) => parseAction()
+      case Token(TokenKind.EPC_MULTISET_OPEN, _, _, _) => parseAction()
       // Conditional Threads
-      case Token(TokenKind.EPC_IF, _) => parseConditionalThread()
-      case _ => Left("Syntax Error: Thread expected!")
+      case Token(TokenKind.EPC_IF, _, _, _) => parseConditionalThread()
+      case _ => Left(error("EPC command expected"))
     }
 
   /**
@@ -2470,7 +2442,7 @@ class Parser(lexer: Tokenizer) {
    */
   private def checkThreadUnitFirstSet(): Boolean =
     lexer.peek() match {
-      case Token(kind, value) if threadUnitFirstSet contains kind => true
+      case Token(kind, value, _, _) if threadUnitFirstSet contains kind => true
       case _ => false
     }
 
@@ -2481,15 +2453,25 @@ class Parser(lexer: Tokenizer) {
    */
   def parseThread(): Either[String, Thread] =
     val units = new ListBuffer[ThreadUnit]
-    while (checkThreadUnitFirstSet() || check(TokenKind.SEMICOLON)) {
-      if (check(TokenKind.SEMICOLON)) {
-        consume(TokenKind.SEMICOLON)
-      }
+    while {
       (for threadUnit <- parseThreadUnit() yield threadUnit) match {
         case Right(value) => units addOne value
         case Left(value) => return Left(value)
       }
+      val repeatCondition = check(TokenKind.SEMICOLON)
+      if (!repeatCondition && checkThreadUnitFirstSet()) {
+        return Left(error("sequencing operator ';' not found before next command"))
+      }
+      if (repeatCondition) {
+        consume(TokenKind.SEMICOLON) match {
+          case Right(token) if !checkThreadUnitFirstSet() =>
+            return Left(error(token, "sequencing operator ';' not followed by a command"))
+          case _ =>
+        }
+      }
+      repeatCondition
     }
+    do ()
     Right(units.toList)
 
   /**
@@ -2526,101 +2508,6 @@ class Parser(lexer: Tokenizer) {
         loop(lhs)
       }
     } yield finalResult
-
-
-//  /**
-//   * Parse a guard.
-//   *
-//   * Guard := EmptyProcess | ActionPrefix
-//   */
-//  private def parseGuard(): Either[String, Guard] =
-//    lexer.peek() match {
-//      case Token(TokenKind.INTEGER, "0") => parseEmptyProcess()
-//      case _ => parseActionPrefix()
-//    }
-//
-//  /**
-//   * Parse an empty process.
-//   *
-//   * EmptyProcess := '0'
-//   *
-//   */
-//  private def parseEmptyProcess(): Either[String, EmptyProcess] =
-//    lexer.peek() match {
-//      case Token(TokenKind.INTEGER, "0") => for _ <- consume(TokenKind.INTEGER) yield EmptyProcess()
-//      case _ => Left(s"Syntax error: empty process expected!")
-//    }
-//
-//  /**
-//   * ActionPrefix := Action '.' Thread
-//   *
-//   * E.g. var x . << x := 10 >> . 0
-//   */
-//  private def parseActionPrefix(): Either[String, ActionPrefix] =
-//    for {
-//      action <- parseAction()
-//      _ <- consume(TokenKind.DOT)
-//      thread <- parseThread()
-//    } yield ActionPrefix(action, thread)
-//
-//  /**
-//   * Parse a thread.
-//   *
-//   * Thread := Guard | ConditionalThread | ThreadInstantiation | ThreadComposition
-//   */
-//  def parseThread(): Either[String, Thread] =
-//    parseThreadComposition()
-//
-//  /**
-//   * Parse a thread composition.
-//   *
-//   * ThreadComposition := Thread | Thread
-//   *
-//   * E.g. (var x . 0) | (var y . 0)
-//   */
-//  private def parseThreadComposition(): Either[String, Thread] =
-//    for {
-//      lhs <- parsePrimaryThread()
-//      finalResult <- {
-//        def loop(lhs: Thread): Either[String, Thread] = {
-//          if check(TokenKind.EPC_THREAD_COMPOSITION) then for {
-//            _ <- consume(TokenKind.EPC_THREAD_COMPOSITION)
-//            rhs <- parsePrimaryThread()
-//            intermediateResult <- loop(ThreadComposition(lhs, rhs))
-//          } yield intermediateResult
-//          else Right(lhs)
-//        }
-//        loop(lhs)
-//      }
-//    } yield finalResult
-//
-//  /**
-//   * Parse a primary thread.
-//   *
-//   * PrimaryThread := Guard | ConditionalThread | ThreadInstantiation
-//   *
-//   */
-//  private def parsePrimaryThread(): Either[String, Thread] = {
-//    if check(List(TokenKind.IDENTIFIER, TokenKind.LEFT_ROUND_BRACKET, TokenKind.RIGHT_ROUND_BRACKET))
-//      then parseThreadInstantiation()
-//    else lexer.peek() match {
-//      // Guards
-//      case Token(TokenKind.INTEGER, "0") => parseGuard()
-//      case Token(TokenKind.EPC_VAR, _) => parseGuard()
-//      case Token(TokenKind.LEFT_ANGLE_BRACKET, _) => parseGuard()
-//      case Token(TokenKind.IDENTIFIER, _) => parseGuard()
-//      case Token(TokenKind.EPC_MULTISET_OPEN, _) => parseGuard()
-//      // Conditional Threads
-//      case Token(TokenKind.EPC_IF, _) => parseConditionalThread()
-//      // Thread within parenthesis
-//      case Token(TokenKind.LEFT_ROUND_BRACKET, _) => for {
-//        _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
-//        thread <- parseThread()
-//        _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
-//      } yield thread
-//      case _ => Left("Syntax Error: Thread expected!")
-//    }
-//  }
 
   /**
    * ThreadDefinition := 'def' Identifier [ '(' CommaList(Identifier) ')' ] ? '=' Thread
@@ -2696,7 +2583,7 @@ class Parser(lexer: Tokenizer) {
         network <- parseNetwork()
         _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
       } yield network
-    else Left("Syntax Error: Network expected!")
+    else Left(error("Network expected"))
 
   /**
    * Parse a location.

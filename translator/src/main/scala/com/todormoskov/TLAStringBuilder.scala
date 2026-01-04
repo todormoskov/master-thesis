@@ -64,7 +64,7 @@ class TLAStringBuilder {
     val OperatorDeclaration(operator, arguments) = operatorDeclaration
     operator match {
       case Identifier(name) => appendString(name)
-      case Token(kind, value) => appendString(value)
+      case Token(kind, value, _, _) => appendString(value)
     }
     arguments match {
       case Nil =>
