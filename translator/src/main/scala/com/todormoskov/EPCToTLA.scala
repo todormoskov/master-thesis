@@ -470,7 +470,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     // Optionally generate the Fail operator
     val failOption = Option.when (epcCtx.failStopConfigured) (OperatorDefinition(
       NonFixLHS(Fail, Nil),
-      BoundedQuantifiedExpression("\\E", List(selfInProcSet), ConjunctionList(Nil
+      BoundedQuantifiedExpression("\\E", List(selfInProcSetMaybeWithoutF), ConjunctionList(Nil
         ++ Option.when(epcCtx.weakAccuracyConfigured)(BinaryExpression("#", self, trim))
         ++ Some(BinaryExpression("=", PrimedExpression(F), BinaryExpression("\\cup", F, ExplicitSet(List(self)))))
         ++ Some(UnchangedExpr(getUnchangedVars(tlaVariables, List(F))))
@@ -533,7 +533,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
    * \A self \in ProcSet: \A thd \in ThreadSet[self]: pc[self][thd] = "Done"
    */
   private def generateTerminationPredicate() =
-    BoundedQuantifiedExpression("\\A", List(selfInProcSet), BoundedQuantifiedExpression("\\A", List(thdInThreadSetSelf), BinaryExpression("=", pcThreadValue, Done)))
+    BoundedQuantifiedExpression("\\A", List(selfInProcSetMaybeWithoutF), BoundedQuantifiedExpression("\\A", List(thdInThreadSetSelf), BinaryExpression("=", pcThreadValue, Done)))
 
   /**
    * Create a disjunction of the possible actions of a thread within a location.
@@ -551,10 +551,10 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
    */
   private def generateThreadActionsDisjunction(thdIdentifier: Identifier, generatedTlaActions: List[OperatorDefinition]) =
     OperatorDefinition(NonFixLHS(Identifier(thdIdentifier.name), Nil),
-      BoundedQuantifiedExpression("\\E", List(threadsActionDisjunctionSelfInDomain),
+      BoundedQuantifiedExpression("\\E", List(selfInProcSetMaybeWithoutF),
         BoundedQuantifiedExpression("\\E", List(thdInThreadSetSelf), foldToDisjunction(generatedTlaActions))))
 
-  private def threadsActionDisjunctionSelfInDomain = if epcCtx.failStopConfigured then QuantifierBound(self, BinaryExpression("\\", ProcSet, F)) else selfInProcSet
+  private def selfInProcSetMaybeWithoutF = if epcCtx.failStopConfigured then QuantifierBound(self, BinaryExpression("\\", ProcSet, F)) else selfInProcSet
 
   /**
    * Maps each operator definition (p_j_1A(self, thd) == ...) to an identifier application ( p_j_1A(self, thd) )
@@ -728,7 +728,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
             List(
               OperatorDefinition(NonFixLHS(Identifier(currentLabel), List(self, thd)), ConjunctionList(
                 List(pcEnablingCondition)
-                  ++ generateThreadInstantiationEffect(freeVariables, locationVariables, successorLabel)
+                  ++ generateThreadInstantiationPreconditions(freeVariables, locationVariables, successorLabel)
                   ++ Some(PCUpdate(threadEntryOperationLabel))
                   // If there is a successor in the same region, we push that successor on the "return addresses" stack.
                   ++ Option.when(successorLabel != DONE) (ThdLvlExceptUpdate(ra, BinaryExpression("\\o", Tuple(List(Literal(successorLabel))), ThdLvlFnAppl(ra))))
@@ -848,7 +848,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
    * Generate the enabling condition for the program counter
    * E.g. pc[self][thd] = "..."
    */
-  private def PCEnablingCondition(label: String): Expression = BinaryExpression("=", ThdLvlFnAppl(Identifier("pc")), Literal(label))
+  private def PCEnablingCondition(label: String): Expression = BinaryExpression("=", ThdLvlFnAppl(pc), Literal(label))
 
   /**
    * Generate the update for the program counter.
@@ -876,9 +876,9 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   private def RAUpdateOnThreadExit(): Expression =
     ThdLvlExceptUpdate(Identifier("ra"),
       IfThenElse(
-        BinaryExpression("#", ThdLvlFnAppl(Identifier("ra")), Tuple(Nil)),
-        IdentifierApplication(Identifier("Tail"), List(ThdLvlFnAppl(Identifier("ra")))),
-        ThdLvlFnAppl(Identifier("ra"))
+        BinaryExpression("#", ThdLvlFnAppl(ra), Tuple(Nil)),
+        IdentifierApplication(Identifier("Tail"), List(ThdLvlFnAppl(ra))),
+        ThdLvlFnAppl(ra)
       )
     )
 
@@ -934,26 +934,12 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   private def generateDeclarationEffect(identifier: Identifier, locationVariables: List[Identifier]): List[Expression] = {
     // We require that the variable in the var action is Undefined at the location.
     // E.g. x[self] = Undefined
-    val variableIsUndefined = BinaryExpression(
-      "=",
-      // FunctionApplication(Identifier(identifier.name), List(Identifier("self"))),
-      EPCtoTLAExpression.rewrite(identifier, locationVariables),
-      Identifier("Undefined")
-    )
+    val variableIsUndefined = BinaryExpression("=", rewriteAccessToLocationVariables(identifier, locationVariables), Undefined)
     // The effect of the action is that the variable is now Initialized at the location.
     // E.g. x' = [x EXCEPT ![self] = Initialized]
-    val variableIsInitializedInNextState = BinaryExpression(
-      "=",
+    val variableIsInitializedInNextState = BinaryExpression("=",
       PrimedExpression(identifier),
-      ExceptExpression(
-        identifier,
-        List(
-          ExceptClause(
-            SelectorPath(List(IndexSelector(List(Identifier("self"))))),
-            Identifier("Initialized")
-          )
-        )
-      )
+      ExceptExpression(identifier, List(ExceptClause(SelectorPath(List(IndexSelector(List(self)))), Initialized)))
     )
     List(variableIsUndefined, variableIsInitializedInNextState)
   }
@@ -961,37 +947,24 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   private def generateAssignmentEffect(identifier: Identifier, expression: Expression, locationVariables: List[Identifier]): List[Expression] = {
     // We require that the variable in the assign action is not Undefined at the location.
     // E.g. x[self] # Undefined
-    val variableIsNotUndefined = BinaryExpression(
-      "#",
-      FunctionApplication(Identifier(identifier.name), List(Identifier("self"))),
-      Identifier("Undefined")
-    )
+    val variableIsNotUndefined = BinaryExpression("#", rewriteAccessToLocationVariables(identifier, locationVariables), Undefined)
     // The effect of the action is that the variable at the location is now set to the rhs of the assign action.
     // E.g. x' = [x EXCEPT ![self] = expression...]
-    val variableIsSetToExpressionInNextState = BinaryExpression(
-      "=",
+    val variableIsSetToExpressionInNextState = BinaryExpression("=",
       PrimedExpression(identifier),
-      ExceptExpression(
-        identifier,
-        List(
-          ExceptClause(
-            SelectorPath(List(IndexSelector(List(Identifier("self"))))),
-            // Rewrite all variable read operations like this x -> x[self]
-            EPCtoTLAExpression.rewrite(expression, locationVariables)
-          )
-        )
-      )
+      // Rewrite all variable read operations like this x -> x[self]
+      ExceptExpression(identifier, List(ExceptClause(SelectorPath(List(IndexSelector(List(self)))), rewriteAccessToLocationVariables(expression, locationVariables))))
     )
     List(variableIsNotUndefined, variableIsSetToExpressionInNextState)
   }
 
   private def generateReceiveEffect(channel: Expression, locationExpr: Expression, variable: Identifier, locationVariables: List[Identifier]): List[Expression] = {
-    val sourceExpr = EPCtoTLAExpression.rewrite(locationExpr, locationVariables)
-    val variableExpr = EPCtoTLAExpression.rewrite(variable, locationVariables)
+    val sourceExpr = rewriteAccessToLocationVariables(locationExpr, locationVariables)
+    val variableExpr = rewriteAccessToLocationVariables(variable, locationVariables)
     // We require that the location expression can be evaluation to a valid location (is element of ProcSet).
-    val sourceExprIsInProcSet = BinaryExpression("\\in", sourceExpr, Identifier("ProcSet"))
+    val sourceExprIsInProcSet = BinaryExpression("\\in", sourceExpr, ProcSet)
     // We require that the variable in the "receive" action is not Undefined at the location. E.g. x[self] # Undefined.
-    val variableIsNotUndefined = BinaryExpression("#", variableExpr, Identifier("Undefined"))
+    val variableIsNotUndefined = BinaryExpression("#", variableExpr, Undefined)
     // Another precondition is that there is a message in the given channel
     // \E msg \in DOMAIN (channel)
     val messageHandlingEffect = BoundedQuantifiedExpression(
@@ -1013,13 +986,13 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           BinaryExpression(
             "=",
             FunctionApplication(Identifier("msg"), List(Literal(1))),
-            EPCtoTLAExpression.rewrite(locationExpr, locationVariables)
+            rewriteAccessToLocationVariables(locationExpr, locationVariables)
           ),
           // msg[2] = self
           BinaryExpression(
             "=",
             FunctionApplication(Identifier("msg"), List(Literal(2))),
-            Identifier("self")
+            self
           ),
           // The first effect of the action is that the variable at the location is now set to the payload of the message.
           // E.g. x' = [x EXCEPT ![self] = msg[3] ]
@@ -1030,7 +1003,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
               variable,
               List(
                 ExceptClause(
-                  SelectorPath(List(IndexSelector(List(Identifier("self"))))),
+                  SelectorPath(List(IndexSelector(List(self)))),
                   FunctionApplication(Identifier("msg"), List(Literal(3)))
                 )
               )
@@ -1045,7 +1018,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
               "(-)",
               channel,
               IdentifierApplication(
-                Identifier("SetToBag"),
+                SetToBag,
                 List(
                   ExplicitSet(
                     List(
@@ -1063,12 +1036,12 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   }
 
   private def generateSuspectEffect(location: Expression, locationVariables: List[Identifier]): List[Expression] = {
-    val sourceExpr = EPCtoTLAExpression.rewrite(location, locationVariables)
+    val sourceExpr = rewriteAccessToLocationVariables(location, locationVariables)
     // We require that the source location in the "receive" action is a process.
     // E.g. <location-expression> \in ProcSet
-    val sourceIsInProcSet = BinaryExpression("\\in", sourceExpr, Identifier("ProcSet"))
+    val sourceIsInProcSet = BinaryExpression("\\in", sourceExpr, ProcSet)
     // And that it is not the trusted immortal
-    val sourceIsNotTrustedImmortal = BinaryExpression("#", sourceExpr, Identifier(TRUSTED_IMMORTAL))
+    val sourceIsNotTrustedImmortal = BinaryExpression("#", sourceExpr, trim)
     List(sourceIsInProcSet, sourceIsNotTrustedImmortal)
   }
 
@@ -1077,7 +1050,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
                                  thdIdentifierOption: Option[Identifier],
                                  successorLabel: String): List[Expression] =
   {
-    val isThreadExit = thdIdentifierOption.isDefined && successorLabel == "Done"
+    val isThreadExit = thdIdentifierOption.isDefined && successorLabel == DONE
     val pcUpdateUnlessOnThreadExit = Option.unless(isThreadExit)(PCUpdate(successorLabel))
     val pcUpdateOnThreadExit = Option.when(isThreadExit)(PCUpdateOnThreadExit())
     val raUpdateOnThreadExit = Option.when(isThreadExit)(RAUpdateOnThreadExit())
@@ -1121,7 +1094,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         //                                    ELSE "successorLabel"]
         val indexBinder = Identifier("i")
         val allIndices = BinaryExpression("..", Literal(1), Literal(multipleMessages.size))
-        val alreadySend = FunctionApplication(FunctionApplication(Identifier("O"), List(Identifier("self"))), List(Identifier("thd")))
+        val alreadySend = FunctionApplication(FunctionApplication(O, List(self)), List(thd))
         val remainingIndices = BinaryExpression("\\", allIndices, alreadySend)
         val raUpdateOnThreadExitForMultiSend = Option.when(isThreadExit)(generateRAUpdateForMultiSend(indexBinder, allIndices))
         List(
@@ -1142,75 +1115,55 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         // SetToBag({ << self, j, j >> })
         val (boundVariable, indexSet) = enumerator match {
           case BoundedEnumerator(name, "=", domain) =>
-            val rewrittenDomain = EPCtoTLAExpression.rewrite(domain, locationVariables)
+            val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
             (name, ExplicitSet(List(rewrittenDomain)))
           case BoundedEnumerator(name, "\\in", domain) =>
-            val rewrittenDomain = EPCtoTLAExpression.rewrite(domain, locationVariables)
+            val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
             (name, rewrittenDomain)
           case BoundedEnumeratorWithFilter(name, "=", domain, filter) =>
-            val rewrittenDomain = EPCtoTLAExpression.rewrite(domain, locationVariables)
-            val rewrittenFilter = EPCtoTLAExpression.rewrite(filter, locationVariables)
+            val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
+            val rewrittenFilter = rewriteAccessToLocationVariables(filter, locationVariables)
             (name, BoundedSetComprehension(name, ExplicitSet(List(rewrittenDomain)), rewrittenFilter))
           case BoundedEnumeratorWithFilter(name, "\\in", domain, filter) =>
-            val rewrittenDomain = EPCtoTLAExpression.rewrite(domain, locationVariables)
-            val rewrittenFilter = EPCtoTLAExpression.rewrite(filter, locationVariables)
+            val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
+            val rewrittenFilter = rewriteAccessToLocationVariables(filter, locationVariables)
             (name, BoundedSetComprehension(name, rewrittenDomain, rewrittenFilter))
         }
-        val alreadySend = FunctionApplication(FunctionApplication(Identifier("O"), List(Identifier("self"))), List(Identifier("thd")))
+        val alreadySend = FunctionApplication(FunctionApplication(O, List(self)), List(thd))
         val remainingIndices = BinaryExpression("\\", indexSet, alreadySend)
         val raUpdateOnThreadExitForMultiSend = Option.when(isThreadExit)(generateRAUpdateForMultiSend(boundVariable, indexSet))
         List(
           BoundedQuantifiedExpression("\\E", List(QuantifierBound(boundVariable, remainingIndices)), ConjunctionList(
             List(
               generateChannelUpdateForSingleSend(message, locationVariables),
-              generatePCUpdateForMultiSend(boundVariable, indexSet, thdIdentifierOption, successorLabel),
-            )
-              ++ raUpdateOnThreadExitForMultiSend
-              ++ Some(generateOUpdateForMultiSend(boundVariable, indexSet))
+              generatePCUpdateForMultiSend(boundVariable, indexSet, thdIdentifierOption, successorLabel))
+            ++ raUpdateOnThreadExitForMultiSend
+            ++ Some(generateOUpdateForMultiSend(boundVariable, indexSet))
           ))
         )
     }
   }
 
   private def generateChannelUpdateForSingleSend(singleMsg: OutgoingMessage, locationVariables: List[Identifier]) = {
-    BinaryExpression(
-      "=",
-      PrimedExpression(singleMsg.channel),
-      BinaryExpression(
-        "(+)",
-        singleMsg.channel,
-        IdentifierApplication(
-          Identifier("SetToBag"), List(ExplicitSet(List(
-            // Here, we create a triple of the form << self, target, value >>
-            Tuple(List(
-              Identifier("self"),
-              EPCtoTLAExpression.rewrite(singleMsg.target, locationVariables),
-              EPCtoTLAExpression.rewrite(singleMsg.value, locationVariables)
-            ))
-          )))
+    BinaryExpression("=", PrimedExpression(singleMsg.channel),
+      BinaryExpression("(+)", singleMsg.channel,
+        IdentifierApplication(SetToBag, List(ExplicitSet(List(
+          // Here, we create a triple of the form << self, target, value >>
+          Tuple(List(self, rewriteAccessToLocationVariables(singleMsg.target, locationVariables), rewriteAccessToLocationVariables(singleMsg.value, locationVariables))))))
         )
       )
     )
   }
 
   private def generateChannelUpdateForMultiSend(indexBinder: Identifier, multipleMessages: List[OutgoingMessage], locationVariables: List[Identifier]) = {
-    BinaryExpression(
-      "=",
-      PrimedExpression(multipleMessages.head.channel),
+    BinaryExpression("=", PrimedExpression(multipleMessages.head.channel),
       CaseExpression(
         for ((message, idx) <- multipleMessages.zipWithIndex) yield {
           CaseArm(
             BinaryExpression("=", indexBinder, Literal(idx + 1)),
             BinaryExpression("(+)", multipleMessages.head.channel,
-              IdentifierApplication(Identifier("SetToBag"), List(
-                ExplicitSet(List(
-                  Tuple(List(
-                    Identifier("self"),
-                    EPCtoTLAExpression.rewrite(message.target, locationVariables),
-                    EPCtoTLAExpression.rewrite(message.value, locationVariables)
-                  ))
-                ))
-              ))
+              IdentifierApplication(SetToBag, List(ExplicitSet(List(
+                Tuple(List(self, rewriteAccessToLocationVariables(message.target, locationVariables), rewriteAccessToLocationVariables(message.value, locationVariables)))))))
             )
           )
         },
@@ -1224,9 +1177,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
                                            thdIdentifierOption: Option[Identifier],
                                            successorLabel: String) =
   {
-    val isThreadExit = thdIdentifierOption.isDefined && successorLabel == "Done"
-    val O = Identifier("O")
-    val pc = Identifier("pc")
+    val isThreadExit = thdIdentifierOption.isDefined && successorLabel == DONE
     BinaryExpression(
       "=",
       PrimedExpression(pc),
@@ -1236,14 +1187,14 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           // EXCEPT
           ExceptClause(
             // ![self][thd] =
-            SelectorPath(List(IndexSelector(List(Identifier("self"))), IndexSelector(List(Identifier("thd"))))),
+            SelectorPath(List(IndexSelector(List(self)), IndexSelector(List(thd)))),
             // IF O[self][thd] \cup { i } # <domain> THEN pc[self][thd] ELSE <successorLabel>
             IfThenElse(
               BinaryExpression(
                 "#",
                 BinaryExpression(
                   "\\cup",
-                  FunctionApplication(FunctionApplication(O, List(Identifier("self"))), List(Identifier("thd"))),
+                  FunctionApplication(FunctionApplication(O, List(self)), List(thd)),
                   ExplicitSet(List(binder)),
                 ),
                 domain
@@ -1253,9 +1204,9 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
               // ELSE <successorLabel>
               if (isThreadExit) {
                 IfThenElse(
-                  BinaryExpression("#", ThdLvlFnAppl(Identifier("ra")), Tuple(Nil)),
-                  IdentifierApplication(Identifier("Head"), List(ThdLvlFnAppl(Identifier("ra")))),
-                  Literal("Done")
+                  BinaryExpression("#", ThdLvlFnAppl(ra), Tuple(Nil)),
+                  IdentifierApplication(Identifier("Head"), List(ThdLvlFnAppl(ra))),
+                  Done
                 )
               } else {
                 Literal(successorLabel)
@@ -1278,18 +1229,17 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     ThdLvlExceptUpdate(Identifier("ra"),
       // IF O[self][thd] \cup { i } # <domain> THEN @ ELSE Tail(ra[self][thd])
       IfThenElse(
-        BinaryExpression("#", BinaryExpression("\\cup", ThdLvlFnAppl(Identifier("O")), ExplicitSet(List(binder))), domain ),
-        ThdLvlFnAppl(Identifier("ra")),
+        BinaryExpression("#", BinaryExpression("\\cup", ThdLvlFnAppl(O), ExplicitSet(List(binder))), domain),
+        ThdLvlFnAppl(ra),
         IfThenElse(
-          BinaryExpression("#", ThdLvlFnAppl(Identifier("ra")), Tuple(Nil)),
-          IdentifierApplication(Identifier("Tail"), List(ThdLvlFnAppl(Identifier("ra")))),
-          ThdLvlFnAppl(Identifier("ra"))
+          BinaryExpression("#", ThdLvlFnAppl(ra), Tuple(Nil)),
+          IdentifierApplication(Identifier("Tail"), List(ThdLvlFnAppl(ra))),
+          ThdLvlFnAppl(ra)
         )
       )
     )
 
-  def generateOUpdateForMultiSend(binder: Identifier, domain: Expression): Expression = {
-    val O = Identifier("O")
+  private def generateOUpdateForMultiSend(binder: Identifier, domain: Expression): Expression = {
     BinaryExpression(
       "=",
       PrimedExpression(O),
@@ -1299,7 +1249,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           // EXCEPT
           ExceptClause(
             // ![self][thd] =
-            SelectorPath(List(IndexSelector(List(Identifier("self"))), IndexSelector(List(Identifier("thd"))))),
+            SelectorPath(List(IndexSelector(List(self)), IndexSelector(List(thd)))),
             // IF O[self][thd] \cup { i } # <domain>
             IfThenElse(
               BinaryExpression(
@@ -1319,73 +1269,73 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   }
 
   private def generateTruePrecondition(condition: Expression, locationVariables: List[Identifier]): List[Expression] =
-    List( EPCtoTLAExpression.rewrite(condition, locationVariables) )
+    List(rewriteAccessToLocationVariables(condition, locationVariables))
 
   private def generateFalsePrecondition(condition: Expression, locationVariables: List[Identifier]): List[Expression] =
-    List( UnaryExpression("~", ParenthesizedExpression( EPCtoTLAExpression.rewrite(condition, locationVariables) )) )
+    List( UnaryExpression("~", ParenthesizedExpression( rewriteAccessToLocationVariables(condition, locationVariables) )) )
 
-  private def generateThreadInstantiationEffect(freeVariables: List[Identifier], locationVariables: List[Identifier], successorLabel: String): List[Expression] = {
+  private def generateThreadInstantiationPreconditions(freeVariables: List[Identifier], locationVariables: List[Identifier], successorLabel: String): List[Expression] = {
     // We require that the free variables from the thread definition are not Undefined at the location.
     // E.g. x[self] # Undefined, y[self] # Undefined
-    for identifier <- freeVariables yield { BinaryExpression("#", EPCtoTLAExpression.rewrite(identifier, locationVariables), Identifier("Undefined")) }
+    for identifier <- freeVariables yield { BinaryExpression("#", rewriteAccessToLocationVariables(identifier, locationVariables), Identifier("Undefined")) }
   }
-}
 
-object EPCtoTLAExpression {
-
-  private def rewriteVariable(identifier: Identifier, epcVariables: List[Identifier]): Expression =
-    if epcVariables contains identifier then FunctionApplication(identifier, List(Identifier("self"))) else identifier
-
-  def rewrite(expression: Expression, epcVariables: List[Identifier]): Expression = {
+  private def rewrite(expression: Expression, rewriteFn: Expression => Expression): Expression = {
     expression match {
-      case literal: Literal => literal
-      case identifier: Identifier => rewriteVariable(identifier, epcVariables)
-      case IdentifierTuple(identifiers) => Tuple(identifiers.map(rewrite(_, epcVariables)))
-      case qb@QuantifierBound(variable, domain) => qb.copy(domain = rewrite(domain, epcVariables))
-      case m@Mapping(identifier, expression) => m.copy(expression = rewrite(expression, epcVariables))
-      case Tuple(expressions) => Tuple(expressions.map(rewrite(_, epcVariables)))
-      case expr@UnaryExpression(_, expression) => expr.copy(expression = rewrite(expression, epcVariables))
-      case expr@BinaryExpression(_, lhs, rhs) => expr.copy(lhs = rewrite(lhs, epcVariables), rhs = rewrite(rhs, epcVariables))
-      case application@IdentifierApplication(_, operands) => application.copy(operands = operands.map(rewrite(_, epcVariables)))
-      case application@GeneralIdentifierApplication(_, operands) => application.copy(operands = operands.map(rewrite(_, epcVariables)))
-      case FunctionApplication(expression, operands) => FunctionApplication(rewrite(expression, epcVariables), operands.map(rewrite(_, epcVariables)))
-      case PrimedExpression(expression) => PrimedExpression(rewrite(expression, epcVariables))
-      case ParenthesizedExpression(expression) => ParenthesizedExpression(rewrite(expression, epcVariables))
-      case IfThenElse(cond, thenExpr, elseExpr) =>
-        IfThenElse(
-          rewrite(cond, epcVariables),
-          rewrite(thenExpr, epcVariables),
-          rewrite(elseExpr, epcVariables)
-        )
+      case literal: Literal => rewriteFn(literal)
+      case identifier: Identifier => rewriteFn(identifier)
+      case IdentifierTuple(identifiers) => Tuple(identifiers.map(rewriteFn))
+      case qb@QuantifierBound(variable, domain) => qb.copy(domain = rewriteFn(domain))
+      case m@Mapping(identifier, expression) => m.copy(expression = rewriteFn(expression))
+      case Tuple(expressions) => Tuple(expressions.map(rewriteFn))
+      case expr@UnaryExpression(_, expression) => expr.copy(expression = rewriteFn(expression))
+      case expr@BinaryExpression(_, lhs, rhs) => expr.copy(lhs = rewriteFn(lhs), rhs = rewriteFn(rhs))
+      case application@IdentifierApplication(_, operands) => application.copy(operands = operands.map(rewriteFn))
+      case application@GeneralIdentifierApplication(_, operands) => application.copy(operands = operands.map(rewriteFn))
+      case FunctionApplication(expression, operands) => FunctionApplication(rewriteFn(expression), operands.map(rewriteFn))
+      case PrimedExpression(expression) => PrimedExpression(rewriteFn(expression))
+      case ParenthesizedExpression(expression) => ParenthesizedExpression(rewriteFn(expression))
+      case IfThenElse(cond, thenExpr, elseExpr) => IfThenElse(rewriteFn(cond), rewriteFn(thenExpr), rewriteFn(elseExpr))
       case CaseExpression(caseArms, defaultExpression) =>
-        CaseExpression(
-          caseArms.map(caseArm => CaseArm(rewrite(caseArm.lhs, epcVariables), rewrite(caseArm.rhs, epcVariables))),
-          defaultExpression.map(rewrite(_, epcVariables))
-        )
+        CaseExpression(caseArms.map(caseArm => CaseArm(rewriteFn(caseArm.lhs), rewriteFn(caseArm.rhs))), defaultExpression.map(rewriteFn))
       case ChooseExpression(identifier, domain, predicate) =>
-        ChooseExpression(identifier, rewrite(domain, epcVariables), rewrite(predicate, epcVariables))
+        ChooseExpression(identifier, rewriteFn(domain), rewriteFn(predicate))
       case expr@BoundedQuantifiedExpression(quantifiers, binders, body) =>
         expr.copy(
-          binders = binders.map((quantifierBound: QuantifierBound) => QuantifierBound(quantifierBound.variable, rewrite(quantifierBound.domain, epcVariables))),
-          body = rewrite(body, epcVariables)
+          binders = binders.map((quantifierBound: QuantifierBound) => QuantifierBound(quantifierBound.variable, rewriteFn(quantifierBound.domain))),
+          body = rewriteFn(body)
         )
-      case expr@QuantifiedExpression(quantifier, binders, body) => expr.copy(body = rewrite(body, epcVariables))
-      case ConjunctionList(listItems) => ConjunctionList(listItems.map(rewrite(_, epcVariables)))
-      case DisjunctionList(listItems) => DisjunctionList(listItems.map(rewrite(_, epcVariables)))
-      case ExplicitSet(values) => ExplicitSet(values.map(rewrite(_, epcVariables)))
+      case expr@QuantifiedExpression(quantifier, binders, body) => expr.copy(body = rewriteFn(body))
+      case ConjunctionList(listItems) => ConjunctionList(listItems.map(rewriteFn))
+      case DisjunctionList(listItems) => DisjunctionList(listItems.map(rewriteFn))
+      case ExplicitSet(values) => ExplicitSet(values.map(rewriteFn))
       case bsc@BoundedSetComprehension(variable, domain, predicate) =>
-        bsc.copy(domain = rewrite(domain, epcVariables), predicate = rewrite(predicate, epcVariables))
+        bsc.copy(domain = rewriteFn(domain), predicate = rewriteFn(predicate))
       case QuantifiedSetComprehension(mappingExpression, quantifierBounds) =>
         QuantifiedSetComprehension(
-          rewrite(mappingExpression, epcVariables),
-          quantifierBounds.map((qb: QuantifierBound) => QuantifierBound(qb.variable, rewrite(qb.domain, epcVariables)))
+          rewriteFn(mappingExpression),
+          quantifierBounds.map((qb: QuantifierBound) => QuantifierBound(qb.variable, rewriteFn(qb.domain)))
         )
-      case ExplicitFunction(mappings) => ExplicitFunction(mappings.map(mapping => mapping.copy(expression = rewrite(mapping.expression, epcVariables))))
+      case ExplicitFunction(mappings) => ExplicitFunction(mappings.map(mapping => mapping.copy(expression = rewriteFn(mapping.expression))))
       case BoundedMapping(quantifierBounds, expression) =>
         BoundedMapping(
-          quantifierBounds.map((qb: QuantifierBound) => QuantifierBound(qb.variable, rewrite(qb.domain, epcVariables))),
-          rewrite(expression, epcVariables)
+          quantifierBounds.map((qb: QuantifierBound) => QuantifierBound(qb.variable, rewriteFn(qb.domain))),
+          rewriteFn(expression)
         )
     }
+  }
+
+  private def rewriteAccessToLocationVariables(expression: Expression, locationVariables: List[Identifier]): Expression = {
+    // Create a closure that will do the actual rewriting
+    def memoizedRewrite(expression: Expression): Expression = {
+      expression match {
+        case literal: Literal => literal
+        case identifier: Identifier if locationVariables contains identifier => FunctionApplication(identifier, List(self))
+        case identifier: Identifier => identifier
+        case _ => rewrite(expression, memoizedRewrite)
+      }
+    }
+    // Start the rewriting function
+    memoizedRewrite(expression)
   }
 }
