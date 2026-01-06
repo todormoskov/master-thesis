@@ -644,16 +644,17 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
                                  locationVariables: List[Identifier],
                                  allTLAVariables: List[Identifier]): List[OperatorDefinition] = {
     val currentLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, getOperationSuffix(operation))
-    val successorOption = getSuccessor(operation, flattenedRegion, edges)
-    val successorLabel = getSuccessorLabel(locEnumOption, thdEnumOption, thdIdentifierOption, successorOption)
     val pcEnablingCondition = PCEnablingCondition(currentLabel)
-    val isThreadExit = thdIdentifierOption.isDefined && successorLabel == DONE
-    val pcUpdateUnlessOnThreadExit = Option.unless(isThreadExit) (PCUpdate(successorLabel))
-    val pcUpdateOnThreadExit = Option.when(isThreadExit) (PCUpdateOnThreadExit())
-    val raOnThreadExit = Option.when (isThreadExit) (ra)
-    val raUpdateOnThreadExit = Option.when (isThreadExit) (RAUpdateOnThreadExit())
     operation match {
       case LeafOperation(id, label, command) =>
+        // Calculate the successor of the current operation in the current region.
+        val successorOption = getSuccessor(operation, flattenedRegion, edges)
+        val successorLabel = getSuccessorLabel(locEnumOption, thdEnumOption, thdIdentifierOption, successorOption)
+        val isThreadExit = thdIdentifierOption.isDefined && successorLabel == DONE
+        val pcUpdateUnlessOnThreadExit = Option.unless(isThreadExit) (PCUpdate(successorLabel))
+        val pcUpdateOnThreadExit = Option.when(isThreadExit) (PCUpdateOnThreadExit())
+        val raUpdateOnThreadExit = Option.when (isThreadExit) (RAUpdateOnThreadExit())
+        val raOnThreadExit = Option.when (isThreadExit) (ra)
         command match {
           case Declaration(identifier) =>
             List(
@@ -743,30 +744,42 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         }
 
       case IfOperation(id, label, condition, thenRegion, elseRegion) =>
+        // Get the "then" and "else" action labels.
         val thenActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, "T")
         val elseActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, "F")
-        val elseSuccessor = getSuccessorByEdgeLabel(operation, flattenedRegion, edges, "else")
+        // Calculate the "then" and "else" successors and their labels.
         val thenSuccessor = getSuccessorByEdgeLabel(operation, flattenedRegion, edges, "then")
-        val elseSuccessorLabel = getSuccessorLabel(locEnumOption, thdEnumOption, thdIdentifierOption, elseSuccessor)
+        val elseSuccessor = getSuccessorByEdgeLabel(operation, flattenedRegion, edges, "else")
         val thenSuccessorLabel = getSuccessorLabel(locEnumOption, thdEnumOption, thdIdentifierOption, thenSuccessor)
-        val thenPCUpdateUnlessOnThreadExit = Option.unless(isThreadExit)(PCUpdate(thenSuccessorLabel))
-        val elsePCUpdateUnlessOnThreadExit = Option.unless(isThreadExit)(PCUpdate(elseSuccessorLabel))
+        val elseSuccessorLabel = getSuccessorLabel(locEnumOption, thdEnumOption, thdIdentifierOption, elseSuccessor)
+        // Check if the "then" or "else" block is directly exiting a defined thread and create
+        // the "pc" and "ra" updates for both cases (exiting or not exiting a defined thread).
+        val thenIsThreadExit = thdIdentifierOption.isDefined && thenSuccessorLabel == DONE
+        val elseIsThreadExit = thdIdentifierOption.isDefined && elseSuccessorLabel == DONE
+        val thenPCUpdateUnlessOnThreadExit = Option.unless(thenIsThreadExit)(PCUpdate(thenSuccessorLabel))
+        val elsePCUpdateUnlessOnThreadExit = Option.unless(elseIsThreadExit)(PCUpdate(elseSuccessorLabel))
+        val thenPCUpdateOnThreadExit = Option.when(thenIsThreadExit)(PCUpdateOnThreadExit())
+        val elsePCUpdateOnThreadExit = Option.when(elseIsThreadExit)(PCUpdateOnThreadExit())
+        val thenRAUpdateOnThreadExit = Option.when(thenIsThreadExit)(RAUpdateOnThreadExit())
+        val elseRAUpdateOnThreadExit = Option.when(elseIsThreadExit)(RAUpdateOnThreadExit())
+        val thenRAOnThreadExit = Option.when(thenIsThreadExit)(ra)
+        val elseRAOnThreadExit = Option.when(elseIsThreadExit)(ra)
         List(
           OperatorDefinition(NonFixLHS(Identifier(thenActionLabel), List(self, thd)), ConjunctionList(
             List(pcEnablingCondition)
               ++ generateTruePrecondition(condition, locationVariables)
               ++ thenPCUpdateUnlessOnThreadExit
-              ++ pcUpdateOnThreadExit
-              ++ raUpdateOnThreadExit
-              ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(pc, raOnThreadExit))))
+              ++ thenPCUpdateOnThreadExit
+              ++ thenRAUpdateOnThreadExit
+              ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(pc, thenRAOnThreadExit))))
           )),
           OperatorDefinition(NonFixLHS(Identifier(elseActionLabel), List(self, thd)), ConjunctionList(
             List(pcEnablingCondition)
               ++ generateFalsePrecondition(condition, locationVariables)
               ++ elsePCUpdateUnlessOnThreadExit
-              ++ pcUpdateOnThreadExit
-              ++ raUpdateOnThreadExit
-              ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(pc, raOnThreadExit))))
+              ++ elsePCUpdateOnThreadExit
+              ++ elseRAUpdateOnThreadExit
+              ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(pc, elseRAOnThreadExit))))
           ))
         )
     }
@@ -874,7 +887,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
    *                                          ELSE ra[self][thd] ]
    */
   private def RAUpdateOnThreadExit(): Expression =
-    ThdLvlExceptUpdate(Identifier("ra"),
+    ThdLvlExceptUpdate(ra,
       IfThenElse(
         BinaryExpression("#", ThdLvlFnAppl(ra), Tuple(Nil)),
         IdentifierApplication(Identifier("Tail"), List(ThdLvlFnAppl(ra))),
