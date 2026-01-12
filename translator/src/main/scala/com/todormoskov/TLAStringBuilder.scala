@@ -140,7 +140,7 @@ class TLAStringBuilder {
       case BinaryExpression(operator, lhs, rhs) =>
         appendExpression(lhs)
         // Some binary operators look better without space around them.
-        if (Set("..") contains operator) {
+        if (Set(".", "..") contains operator) {
           appendString(operator)
         } else {
           appendString(" ")
@@ -283,8 +283,12 @@ class TLAStringBuilder {
         // [foo EXCEPT ![foo1][foo2] = "FOO", ![bar1, bar2] = "BAR"]
         appendString("[")
         appendExpression(exceptTarget)
-        appendString(" EXCEPT !")
+        appendString(" EXCEPT ")
+        val clausesIndentation = column - 1
         for ((clause, idx) <- clauses.zipWithIndex) {
+          // We write each clause on a new line, all clauses aligned with the ! symbol.
+          if (idx != 0) { appendNewline(); appendString(" ".repeat(clausesIndentation)) }
+          appendString("!")
           for (selectorPart <- clause.selector.parts) {
             selectorPart match {
               case DotSelector(name) =>
@@ -296,7 +300,7 @@ class TLAStringBuilder {
           }
           appendString(" = ")
           appendExpression(clause.value)
-          if (idx != clauses.length - 1) appendString(", ")
+          if (idx != clauses.length - 1) appendString(",")
         }
         appendString("]")
       case WeakStuttering(action, state) =>

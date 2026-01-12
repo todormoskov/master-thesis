@@ -21,7 +21,7 @@ type CFG = (List[Operation], List[DiEdge])
  *  Context collected during the analysis pass.
  */
 case class EPCSpecContext(
-  visibleTLAOperators: mutable.TreeSet[String],
+  visibleTLAOperators: mutable.LinkedHashSet[String],
   channels: mutable.LinkedHashSet[Identifier],
   locationVariables: mutable.LinkedHashMap[Enumerator, mutable.ListBuffer[Mapping]],
   locationThreads: mutable.LinkedHashMap[Enumerator, mutable.ListBuffer[Enumerator]],
@@ -47,7 +47,7 @@ object Analyzer {
       ???
     }
     else {
-      val visibleTLAOperators = mutable.TreeSet.empty[String]
+      val visibleTLAOperators = mutable.LinkedHashSet.empty[String]
       // Firstly, we go over all TLA+ module units before the EPC spec and collect the names of the defined constants, operators and functions.
       // These can then be used as in the EPC spec.
       for (moduleUnit <- tlaModule.moduleUnits.take(epcSpecIndex)) {

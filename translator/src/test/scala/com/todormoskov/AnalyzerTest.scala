@@ -21,6 +21,151 @@ class AnalyzerTest extends AnyFunSuite {
         | successor[n \in Nat] == n + 1
         |
         | (* --EPC SomeEPCSpec
+        | (p = 1) [[ [] <| (j = 1) ( {{}} ) ]]
+        | *)
+        | ====
+        |""".stripMargin
+
+    new Parser(Tokenizer(Scanner(inputSpec))).parseModule() match {
+      case Right(ast) => Analyzer.analyze(ast) match {
+        case Right(epcCtx) => assert(epcCtx.visibleTLAOperators == mutable.LinkedHashSet[String]("N", "successorOfN", "successor"))
+        case Left(value) => fail(value)
+      }
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Analyzer finds all defined channels") {
+    val inputSpec =
+      """
+        | ---- MODULE TlaModuleWithEPCSpec ----
+        | EXTENDS Integers
+        |
+        | (* --EPC SomeEPCSpec
+        | new c1
+        | new c2
+        | *)
+        | ====
+        |""".stripMargin
+
+    new Parser(Tokenizer(Scanner(inputSpec))).parseModule() match {
+      case Right(ast) => Analyzer.analyze(ast) match {
+        case Right(epcCtx) => assert(epcCtx.channels == mutable.LinkedHashSet[Identifier](Identifier("c1"), Identifier("c2")))
+        case Left(value) => fail(value)
+      }
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Analyzer finds all location and all their variables") {
+    val inputSpec =
+      """
+        | ---- MODULE TlaModuleWithEPCSpec ----
+        | EXTENDS Integers
+        |
+        | CONSTANTS N
+        |
+        | (* --EPC SomeEPCSpec
+        |
+        | (p = 0) [[
+        |   [x |-> 10] <| (j = 1) ( {{}} )
+        | ]]
+        | ||
+        | (q \in 1..N) [[
+        |   [y |-> 100] <| (m \in 1..N) ( {{}} )
+        | ]]
+        | ||
+        | (r = N + 1) [[
+        |   [z |-> 100] <| (s \in 1..N) ( {{}} )
+        | ]]
+        |
+        | *)
+        | ====
+        |""".stripMargin
+
+    new Parser(Tokenizer(Scanner(inputSpec))).parseModule() match {
+      case Right(ast) => Analyzer.analyze(ast) match {
+        case Right(epcCtx) =>
+          assert(epcCtx.locationVariables(
+            BoundedEnumerator(Identifier("p"), "=", Literal(0))
+          ) == mutable.ListBuffer(
+            Mapping(Identifier("x"), Literal(10)),
+          ))
+          assert(epcCtx.locationVariables(
+            BoundedEnumerator(Identifier("q"), "\\in", BinaryExpression("..", Literal(1), Identifier("N")))
+          ) == mutable.ListBuffer(
+            Mapping(Identifier("y"), Literal(100)),
+          ))
+          assert(epcCtx.locationVariables(
+            BoundedEnumerator(Identifier("r"), "=", BinaryExpression("+", Identifier("N"), Literal(1)))
+          ) == mutable.ListBuffer(
+            Mapping(Identifier("z"), Literal(100)),
+          ))
+        case Left(value) => fail(value)
+      }
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Analyzer maps location variables to their locations") {
+    val inputSpec =
+      """
+        | ---- MODULE TlaModuleWithEPCSpec ----
+        | EXTENDS Integers
+        |
+        | CONSTANTS N
+        |
+        | (* --EPC SomeEPCSpec
+        |
+        | (p = 0) [[
+        |   [x |-> 10] <| (j = 1) ( {{}} )
+        | ]]
+        | ||
+        | (q \in 1..N) [[
+        |   [y |-> 100] <| (m \in 1..N) ( {{}} )
+        | ]]
+        | ||
+        | (r = N + 1) [[
+        |   [z |-> 100] <| (s \in 1..N) ( {{}} )
+        | ]]
+        |
+        | *)
+        | ====
+        |""".stripMargin
+
+    new Parser(Tokenizer(Scanner(inputSpec))).parseModule() match {
+      case Right(ast) => Analyzer.analyze(ast) match {
+        case Right(epcCtx) =>
+          assert(epcCtx.variablesToLocations(
+            Identifier("x")
+          ) == mutable.ListBuffer(
+            BoundedEnumerator(Identifier("p"), "=", Literal(0))
+          ))
+          assert(epcCtx.variablesToLocations(
+            Identifier("y"),
+          ) == mutable.ListBuffer(
+            BoundedEnumerator(Identifier("q"), "\\in", BinaryExpression("..", Literal(1), Identifier("N")))
+          ))
+          assert(epcCtx.variablesToLocations(
+            Identifier("z"),
+          ) == mutable.ListBuffer(
+            BoundedEnumerator(Identifier("r"), "=", BinaryExpression("+", Identifier("N"), Literal(1)))
+          ))
+        case Left(value) => fail(value)
+      }
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Analyzer finds all location and all their threads") {
+    val inputSpec =
+      """
+        | ---- MODULE TlaModuleWithEPCSpec ----
+        | EXTENDS Integers
+        |
+        | CONSTANTS N
+        |
+        | (* --EPC SomeEPCSpec
         |
         | (p = 0) [[
         |   [x |-> 10] <| (j = 1) ( << x := x + 1 >> ) | (k = 2) ( << x := x + 1 >> )
@@ -40,7 +185,88 @@ class AnalyzerTest extends AnyFunSuite {
 
     new Parser(Tokenizer(Scanner(inputSpec))).parseModule() match {
       case Right(ast) => Analyzer.analyze(ast) match {
-        case Right(epcCtx) => epcCtx.visibleTLAOperators == mutable.Set[String]("N", "SuccessorOfN", "successor")
+        case Right(epcCtx) =>
+          assert(epcCtx.locationThreads(
+            BoundedEnumerator(Identifier("p"), "=", Literal(0))
+          ) == mutable.ListBuffer(
+            BoundedEnumerator(Identifier("j"), "=", Literal(1)),
+            BoundedEnumerator(Identifier("k"), "=", Literal(2))
+          ))
+          assert(epcCtx.locationThreads(
+            BoundedEnumerator(Identifier("q"), "\\in", BinaryExpression("..", Literal(1), Identifier("N")))
+          ) == mutable.ListBuffer(
+            BoundedEnumerator(Identifier("m"), "\\in", BinaryExpression("..", Literal(1), Identifier("N"))),
+            BoundedEnumerator(Identifier("n"), "\\in", BinaryExpression("..",
+              ParenthesizedExpression(BinaryExpression("+", Identifier("N"), Literal(1))),
+              ParenthesizedExpression(BinaryExpression("*", Identifier("N"), Literal(2)))))
+          ))
+          assert(epcCtx.locationThreads(
+            BoundedEnumerator(Identifier("r"), "=", BinaryExpression("+", Identifier("N"), Literal(1)))
+          ) == mutable.ListBuffer(
+            BoundedEnumerator(Identifier("s"), "\\in", BinaryExpression("..", Literal(1), Identifier("N"))),
+            BoundedEnumerator(Identifier("t"), "\\in", BinaryExpression("..",
+              ParenthesizedExpression(BinaryExpression("+", Identifier("N"), Literal(1))),
+              ParenthesizedExpression(BinaryExpression("*", Identifier("N"), Literal(2)))))
+          ))
+        case Left(value) => fail(value)
+      }
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Analyzer finds all defined threads and their free variables") {
+    val inputSpec =
+      """
+        | ---- MODULE TlaModuleWithEPCSpec ----
+        | EXTENDS Integers
+        |
+        | (* --EPC SomeEPCSpec
+        | def foo(x) = << x := x + 1 >>
+        | def bar(x, y, z) = << x := y + z >>
+        | *)
+        | ====
+        |""".stripMargin
+
+    new Parser(Tokenizer(Scanner(inputSpec))).parseModule() match {
+      case Right(ast) => Analyzer.analyze(ast) match {
+        case Right(epcCtx) =>
+          assert(epcCtx.thdDefinitionsToFreeVariables(Identifier("foo")) == mutable.ListBuffer(Identifier("x")))
+          assert(epcCtx.thdDefinitionsToFreeVariables(Identifier("bar")) == mutable.ListBuffer(Identifier("x"), Identifier("y"), Identifier("z")))
+        case Left(value) => fail(value)
+      }
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Analyzer finds messages in transit in networks") {
+    val inputSpec =
+      """
+        | ---- MODULE TlaModuleWithEPCSpec ----
+        | EXTENDS Integers
+        |
+        | (* --EPC SomeEPCSpec
+        | new c
+        |
+        | (p = 1)[[ [] <| (j = 1) ( {{}} ) ]]
+        | ||
+        | {{ c_{1->2}<< "Hello from location 1" >>, c_{2 -> 1}<< "Hello from location 2" >> }}
+        | ||
+        | (q = 2)[[ [] <| (j = 1) ( {{}} ) ]]
+        | *)
+        | ====
+        |""".stripMargin
+
+    new Parser(Tokenizer(Scanner(inputSpec))).parseModule() match {
+      case Right(ast) => Analyzer.analyze(ast) match {
+        case Right(epcCtx) =>
+          assert(epcCtx.messageAether == mutable.ListBuffer(
+            ExplicitMultiSet(
+              List(
+                TravellingMessage(Identifier("c_"), Literal(1), Literal(2), Literal("Hello from location 1")),
+                TravellingMessage(Identifier("c_"), Literal(2), Literal(1), Literal("Hello from location 2"))
+              )
+            )
+          ))
         case Left(value) => fail(value)
       }
       case Left(value) => fail(value)
@@ -417,7 +643,103 @@ class AnalyzerTest extends AnyFunSuite {
     }
   }
 
-  test("Analyzer computes the outgoing bag mappings (operation ID to bag of messages)") {
+  test("Analyzer recognizes EPC specs without multi-send commands") {
+    val inputSpec =
+      """
+        | ---- MODULE TlaModuleWithEPCSpec ----
+        | EXTENDS Integers
+        |
+        | CONSTANTS N
+        |
+        | (* --EPC SomeEPCSpec
+        | new c
+        |
+        | (p = 0) [[
+        |   [x |-> 0] <|
+        |   (j = 0) (
+        |     {{ c@1<< x >> }}
+        |   )
+        | ]]
+        | || (q = 1) [[ [] <| (j = 1) ( {{ }} ) ]]
+        |
+        | *)
+        | ====
+        |""".stripMargin
+
+    new Parser(Tokenizer(Scanner(inputSpec))).parseModule() match {
+      case Right(ast) => Analyzer.analyze(ast) match {
+        case Right(epcCtx) => assert(!epcCtx.specWithMultiSends)
+        case Left(value) => fail(value)
+      }
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Analyzer recognizes EPC specs with multi-send commands (given by explicit multi-sets)") {
+    val inputSpec =
+      """
+        | ---- MODULE TlaModuleWithEPCSpec ----
+        | EXTENDS Integers
+        |
+        | CONSTANTS N
+        |
+        | (* --EPC SomeEPCSpec
+        | new c
+        |
+        | (p = 0) [[
+        |   [x |-> 0] <|
+        |   (j = 0) (
+        |     {{ c@1<< x >>, c@1<< x >> }}
+        |   )
+        | ]]
+        | || (q = 1) [[ [] <| (j = 1) ( {{ }} ) ]]
+        |
+        | *)
+        | ====
+        |""".stripMargin
+
+    new Parser(Tokenizer(Scanner(inputSpec))).parseModule() match {
+      case Right(ast) => Analyzer.analyze(ast) match {
+        case Right(epcCtx) => assert(epcCtx.specWithMultiSends)
+        case Left(value) => fail(value)
+      }
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Analyzer recognizes EPC specs with multi-send commands (given by quantified multi-sets)") {
+    val inputSpec =
+      """
+        | ---- MODULE TlaModuleWithEPCSpec ----
+        | EXTENDS Integers
+        |
+        | CONSTANTS N
+        |
+        | (* --EPC SomeEPCSpec
+        | new c
+        |
+        | (p = 0) [[
+        |   [x |-> 0] <|
+        |   (j = 0) (
+        |     {{ (j \in 1..N) c@j<< x >> }}
+        |   )
+        | ]]
+        | || (q \in 1..N) [[ [] <| (j = 1) ( {{ }} ) ]]
+        |
+        | *)
+        | ====
+        |""".stripMargin
+
+    new Parser(Tokenizer(Scanner(inputSpec))).parseModule() match {
+      case Right(ast) => Analyzer.analyze(ast) match {
+        case Right(epcCtx) => assert(epcCtx.specWithMultiSends)
+        case Left(value) => fail(value)
+      }
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Analyzer recognizes EPC specs with multi-send commands (that appear in defined threads)") {
     val inputSpec =
       """
         | ---- MODULE TlaModuleWithEPCSpec ----
@@ -444,47 +766,10 @@ class AnalyzerTest extends AnyFunSuite {
 
     new Parser(Tokenizer(Scanner(inputSpec))).parseModule() match {
       case Right(ast) => Analyzer.analyze(ast) match {
-        case Right(epcCtx) =>
+        case Right(epcCtx) => assert(epcCtx.specWithMultiSends)
         case Left(value) => fail(value)
       }
       case Left(value) => fail(value)
     }
   }
-
-  test("Random test") {
-    val inputSpec =
-      """
-        | ---- MODULE TlaModuleWithEPCSpec ----
-        |EXTENDS Integers, Sequences, Bags
-        |
-        |(* --EPC HelloWorld
-        | new c
-        |
-        | (p = 1) [[
-        |    [x |-> "Hello World"] <|
-        |    (j = 1) (
-        |        {{ c@2<<x>> }}
-        |    )
-        | ]]
-        | ||
-        | (q = 2) [[
-        |    [y |-> ""] <|
-        |    (j = 1) (
-        |        c@1?(y)
-        |    )
-        | ]]
-        | *)
-        | ====
-        |""".stripMargin
-
-    new Parser(Tokenizer(Scanner(inputSpec))).parseModule() match {
-      case Right(ast) => Analyzer.analyze(ast) match {
-        case Right(epcCtx) =>
-        case Left(value) => fail(value)
-      }
-      case Left(value) => fail(value)
-    }
-  }
-
-
 }

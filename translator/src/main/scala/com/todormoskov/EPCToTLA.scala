@@ -2,11 +2,14 @@ package com.todormoskov
 
 import com.todormoskov.Lexer.{Token, TokenKind}
 
-import scala.collection.mutable
+import scala.collection.{immutable, mutable}
 import scala.collection.mutable.ListBuffer
 
 class EPCToTLA(epcCtx: EPCSpecContext) {
-  private val tlaStringBuilder = new TLAStringBuilder
+  private val tlaStringBuilder = TLAStringBuilder()
+  // The knownIdentifiers set is used to remember all identifiers, which we have already seen
+  // (or we have created on our own), in order to create new, unique identifiers.
+  private val knownIdentifiers = mutable.LinkedHashSet.empty[Identifier]
 
   // Constant names
   private val CONSTANTS = "CONSTANTS"
@@ -88,6 +91,8 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     val allTLAVariables = List(pc) ++ raOption ++ OOption ++ FOption ++ trimOption ++ locationVariables ++ declaredChannels
     val variablesDeclaration = VariableDeclaration(Token(TokenKind.VARIABLES, VARIABLES, -1, -1), allTLAVariables)
     tlaStringBuilder.appendUnit(variablesDeclaration, newlines = 2)
+    // Add all TLA variables to the set with known identifiers.
+    allTLAVariables.foreach(knownIdentifiers.addOne)
 
     // We also add the operator vars == << ... >>, which is a list with all variables.
     val varsOperator = OperatorDefinition(NonFixLHS(vars, Nil), Tuple(allTLAVariables))
@@ -980,68 +985,23 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     val variableIsNotUndefined = BinaryExpression("#", variableExpr, Undefined)
     // Another precondition is that there is a message in the given channel
     // \E msg \in DOMAIN (channel)
+    val messageBinder = getUniqueIdentifier(Identifier("msg"))
     val messageHandlingEffect = BoundedQuantifiedExpression(
-      "\\E",
-      List(
-        QuantifierBound(
-          Identifier("msg"),
-          UnaryExpression(
-            "DOMAIN",
-            ParenthesizedExpression(
-              channel
-            )
-          )
-        ),
-      ),
+      "\\E", List(QuantifierBound(messageBinder, UnaryExpression("DOMAIN", channel))),
       ConjunctionList(
         List(
           // msg[1] = ... (location-expression)
-          BinaryExpression(
-            "=",
-            FunctionApplication(Identifier("msg"), List(Literal(1))),
-            rewriteAccessToLocationVariables(locationExpr, locationVariables)
-          ),
+          BinaryExpression("=", FunctionApplication(messageBinder, List(Literal(1))), rewriteAccessToLocationVariables(locationExpr, locationVariables)),
           // msg[2] = self
-          BinaryExpression(
-            "=",
-            FunctionApplication(Identifier("msg"), List(Literal(2))),
-            self
-          ),
+          BinaryExpression("=", FunctionApplication(messageBinder, List(Literal(2))), self),
           // The first effect of the action is that the variable at the location is now set to the payload of the message.
           // E.g. x' = [x EXCEPT ![self] = msg[3] ]
-          BinaryExpression(
-            "=",
-            PrimedExpression(variable),
-            ExceptExpression(
-              variable,
-              List(
-                ExceptClause(
-                  SelectorPath(List(IndexSelector(List(self)))),
-                  FunctionApplication(Identifier("msg"), List(Literal(3)))
-                )
-              )
-            )
-          ),
+          BinaryExpression("=", PrimedExpression(variable), ExceptExpression(variable, List(
+            ExceptClause(SelectorPath(List(IndexSelector(List(self)))), FunctionApplication(messageBinder, List(Literal(3))))
+          ))),
           // The second effect of the action is that the message is removed from the channel.
           // E.g. c' = c (-) SetToBag( {msg} )
-          BinaryExpression(
-            "=",
-            PrimedExpression(channel), // TODO Check if this is correct when the channel is not given by an identifier, but for example as a function f[...]
-            BinaryExpression(
-              "(-)",
-              channel,
-              IdentifierApplication(
-                SetToBag,
-                List(
-                  ExplicitSet(
-                    List(
-                      Identifier("msg")
-                    )
-                  )
-                )
-              )
-            )
-          )
+          BinaryExpression("=", PrimedExpression(channel), BinaryExpression("(-)", channel, IdentifierApplication(SetToBag, List(ExplicitSet(List(messageBinder))))))
         )
       )
     )
@@ -1105,7 +1065,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         // - pc' = [pc EXCEPT ![self][thd] = IF O[self][thd] \cup { i } # 1..2
         //                                    THEN @
         //                                    ELSE "successorLabel"]
-        val indexBinder = Identifier("i")
+        val indexBinder = getUniqueIdentifier(Identifier("i"))
         val allIndices = BinaryExpression("..", Literal(1), Literal(multipleMessages.size))
         val alreadySend = FunctionApplication(FunctionApplication(O, List(self)), List(thd))
         val remainingIndices = BinaryExpression("\\", allIndices, alreadySend)
@@ -1127,20 +1087,39 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         // Still, we need to the bounded variable, so we turn the domain into a set. This example will be translated into:
         // SetToBag({ << self, j, j >> })
         val (boundVariable, indexSet) = enumerator match {
+          // Translate the bounded enumerators into pairs of a binder and a set.
+          // {{ (j = 1) c@j!<<j>> }}       --> (j, {1})   --> \E j \in {1}
+          // {{ (j \in 1..N) c@j!<<j>> }}  --> (j, 1..N)  --> \E j \in 1..N
           case BoundedEnumerator(name, "=", domain) =>
             val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
             (name, ExplicitSet(List(rewrittenDomain)))
           case BoundedEnumerator(name, "\\in", domain) =>
             val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
             (name, rewrittenDomain)
+          // Turning bounded enumerators with filters into index sets introduces binders with the same name:
+          // {{ (j = 1) c@j!<<j>> : j # 1 }}           --> \E j \in { j \in {1}: j # 1 }: ...
+          // {{ (j \in 1..N) c@j!<<j>> : j # self }}   --> \E j \in { j \in 1..N: j # self }: ...
+          // To avoid this, we do a renaming of the inner binder with a unique name, constructed from the bound variable.
           case BoundedEnumeratorWithFilter(name, "=", domain, filter) =>
             val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
             val rewrittenFilter = rewriteAccessToLocationVariables(filter, locationVariables)
-            (name, BoundedSetComprehension(name, ExplicitSet(List(rewrittenDomain)), rewrittenFilter))
+            val setComprehension = BoundedSetComprehension(name, ExplicitSet(List(rewrittenDomain)), rewrittenFilter)
+            // We "throw away" the identifier with the same name as given in the EPC code (e.g. simply j).
+            if (!knownIdentifiers.contains(name)) getUniqueIdentifier(name)
+            // We create a new identifier for the inner set comprehension (e.g. j1).
+            val innerBinder = getUniqueIdentifier(name)
+            val renamedSetComprehension = renameBV(name, innerBinder, setComprehension, depth = 1)
+            (name, renamedSetComprehension)
           case BoundedEnumeratorWithFilter(name, "\\in", domain, filter) =>
             val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
             val rewrittenFilter = rewriteAccessToLocationVariables(filter, locationVariables)
-            (name, BoundedSetComprehension(name, rewrittenDomain, rewrittenFilter))
+            val setComprehension = BoundedSetComprehension(name, rewrittenDomain, rewrittenFilter)
+            // We "throw away" the identifier with the same name as given in the EPC code (e.g. simply j).
+            if (!knownIdentifiers.contains(name)) getUniqueIdentifier(name)
+            // We create a new identifier for the inner set comprehension (e.g. j1).
+            val innerBinder = getUniqueIdentifier(name)
+            val renamedSetComprehension = renameBV(name, innerBinder, setComprehension, depth = 1)
+            (name, renamedSetComprehension)
         }
         val alreadySend = FunctionApplication(FunctionApplication(O, List(self)), List(thd))
         val remainingIndices = BinaryExpression("\\", indexSet, alreadySend)
@@ -1293,6 +1272,10 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     for identifier <- freeVariables yield { BinaryExpression("#", rewriteAccessToLocationVariables(identifier, locationVariables), Identifier("Undefined")) }
   }
 
+  /**
+   * General rewrite, which allows to rewrite different AST nodes of a TLA+ expression with an input "rewrite function".
+   * The method iterates recusively over an AST and rewrites each node using the rewrite funciton.
+   */
   private def rewrite(expression: Expression, rewriteFn: Expression => Expression): Expression = {
     expression match {
       case literal: Literal => rewriteFn(literal)
@@ -1335,9 +1318,26 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           quantifierBounds.map((qb: QuantifierBound) => QuantifierBound(qb.variable, rewriteFn(qb.domain))),
           rewriteFn(expression)
         )
+      case setOfAllFunctions@SetOfAllFunctions(domain, codomain) => SetOfAllFunctions(rewriteFn(domain), rewriteFn(codomain))
+      case setOfAllRecords@SetOfAllRecords(mappings) => SetOfAllRecords(mappings.map(mapping => mapping.copy(expression = rewriteFn(mapping.expression))))
+      // EXCEPT Expressions are rewritten as a whole.
+      // This means that each rewrite function should rewrite these EXCEPT expressions,
+      // in order to prevent endless recursion, leading to stack overflows!
+      case exceptExpr: ExceptExpression => rewriteFn(exceptExpr)
+      // The following expressions are simply returned unchanged
+      case genIdentifier: GeneralIdentifier => genIdentifier
+      case ws: WeakStuttering => ws
+      case ss: StrongStuttering => ss
+      case wf: WeakFairness => wf
+      case sf: StrongFairness => sf
+      case at: AtSign => at
     }
   }
 
+  /**
+   * Method for rewriting the occurrences of location variables in expressions when translating from EPC to TLA+.
+   * A EPC expression "x + 1" for a location variable "x" is translated into "x[self] + 1" in the corresponding TLA+ expression.
+   */
   private def rewriteAccessToLocationVariables(expression: Expression, locationVariables: List[Identifier]): Expression = {
     // Create a closure that will do the actual rewriting
     def memoizedRewrite(expression: Expression): Expression = {
@@ -1345,10 +1345,231 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         case literal: Literal => literal
         case identifier: Identifier if locationVariables contains identifier => FunctionApplication(identifier, List(self))
         case identifier: Identifier => identifier
+        case exceptExpr@ExceptExpression(exceptTarget, clauses) =>
+          // We map each clause to a new clause with the following changes:
+          // (1) If the EXCEPT target is a location variable (e.g. x), it is changed to x[self]
+          // (2) The dot selectors are left unchanged.
+          // (3) The index selectors are also rewritten.
+          val updatedTarget = if locationVariables contains exceptTarget then FunctionApplication(exceptTarget, List(self)) else exceptTarget
+          ExceptExpression(updatedTarget, clauses.map(clause => ExceptClause(
+            SelectorPath(clause.selector.parts.map {
+              case dotSelector: DotSelector => dotSelector
+              case indexSelector: IndexSelector => IndexSelector(indexSelector.indices.map(expr => rewrite(expr, memoizedRewrite)))
+            }),
+            rewrite(clause.value, memoizedRewrite)
+          )))
         case _ => rewrite(expression, memoizedRewrite)
       }
     }
     // Start the rewriting function
     memoizedRewrite(expression)
+  }
+
+  /**
+   * Renames the "from" identifier to the "to" identifier in the target identifier, list of identifiers or identifier tuple.
+   */
+  private def renameBV(from: Identifier, to: Identifier, target: Identifier | List[Identifier] | IdentifierTuple): Identifier | List[Identifier] | IdentifierTuple = {
+    target match {
+      case identifier: Identifier => to
+      case identifiers: List[Identifier] => identifiers.map(renameBV(from, to, _).asInstanceOf[Identifier])
+      case tuple: IdentifierTuple => IdentifierTuple(tuple.identifiers.map(renameBV(from, to, _).asInstanceOf[Identifier]))
+    }
+  }
+
+  /**
+   * Renames the "from" identifier to the "to" identifier in target quantifier bound, if the depth is positive.
+   */
+  private def renameBV(from: Identifier, to: Identifier, qb: QuantifierBound, depth: Int): QuantifierBound = {
+    // If we encounter the "from" identifier as the binder in the quantifier bound, we rename it, and we keep the domain as it is.
+    if (bv(qb).contains(from) && depth > 0) {
+      QuantifierBound(renameBV(from, to, qb.variable), qb.domain)
+    }
+    // If we encounter the "from" identifier as the binder, but depth == 0 (meaning we should not rename further)
+    // We keep the binder the same, but rename all free occurrences in the domain.
+    else if (bv(qb).contains(from) && depth == 0) {
+      QuantifierBound(qb.variable, renameBV(from, to, qb.domain, depth))
+    }
+    // If we encounter another binder, we leave it as it is and substitute recursively in the domain.
+    else {
+      QuantifierBound(qb.variable, renameBV(from, to, qb.domain, depth))
+    }
+  }
+
+  /**
+   * Renames the "from" identifier to the "to" identifier in the list with quantifier bounds, if the depth is positive.
+   */
+  private def renameBV(from: Identifier, to: Identifier, qbs: List[QuantifierBound], depth: Int): List[QuantifierBound] =
+    qbs.map(renameBV(from, to, _, depth: Int))
+
+  /**
+   * Renames the "from" identifier to the "to" identifier in target expression, if the depth is positive.
+   */
+  private def renameBV(from: Identifier, to: Identifier, target: Expression, depth: Int): Expression = {
+    target match {
+      case literal: Literal => literal
+      case identifier: Identifier if identifier == from => to
+      case identifier: Identifier => identifier
+      case IdentifierTuple(identifiers) => Tuple(identifiers.map(renameBV(from, to, _, depth)))
+      case quantifierBound: QuantifierBound => renameBV(from, to, quantifierBound, depth)
+      case Mapping(identifier, expression) => Mapping(identifier, renameBV(from, to, expression, depth))
+      case Tuple(expressions) => Tuple(expressions.map(renameBV(from, to, _, depth)))
+      case expr@UnaryExpression(_, expression) => expr.copy(expression = renameBV(from, to, expression, depth))
+      case expr@BinaryExpression(_, lhs, rhs) => expr.copy(lhs = renameBV(from, to, lhs, depth), rhs = renameBV(from, to, rhs, depth))
+      case application@IdentifierApplication(_, operands) => application.copy(operands = operands.map(renameBV(from, to, _, depth)))
+      case application@GeneralIdentifierApplication(_, operands) => application.copy(operands = operands.map(renameBV(from, to, _, depth)))
+      case FunctionApplication(expression, operands) => FunctionApplication(renameBV(from, to, expression, depth), operands.map(renameBV(from, to, _, depth)))
+      case PrimedExpression(expression) => PrimedExpression(renameBV(from, to, expression, depth))
+      case ParenthesizedExpression(expression) => ParenthesizedExpression(renameBV(from, to, expression, depth))
+      case IfThenElse(cond, thenExpr, elseExpr) => IfThenElse(renameBV(from, to, cond, depth), renameBV(from, to, thenExpr, depth), renameBV(from, to, elseExpr, depth))
+      case CaseExpression(caseArms, defaultExpression) =>
+        CaseExpression(caseArms.map(caseArm => CaseArm(renameBV(from, to, caseArm.lhs, depth), renameBV(from, to, caseArm.rhs, depth))),
+          defaultExpression.map(renameBV(from, to, _, depth)))
+      case ChooseExpression(identifier, domain, predicate) if bv(identifier).contains(from) && depth > 0 =>
+        ChooseExpression(
+          to,
+          domain,
+          renameBV(from, to, predicate, depth - 1)
+        )
+      case ChooseExpression(identifier, domain, predicate) if bv(identifier).contains(from) && depth == 0 =>
+        ChooseExpression(identifier, domain, predicate)
+      case ChooseExpression(identifier, domain, predicate) =>
+        ChooseExpression(
+          identifier,
+          renameBV(from, to, domain, depth),
+          renameBV(from, to, predicate, depth)
+        )
+      case BoundedQuantifiedExpression(quantifier, binders, body) if bv(binders).contains(from) && depth > 0 =>
+        BoundedQuantifiedExpression(
+          quantifier,
+          renameBV(from, to, binders, depth),
+          renameBV(from, to, body, depth - 1)
+        )
+      case BoundedQuantifiedExpression(quantifier, binders, body) if bv(binders).contains(from) && depth == 0 =>
+        BoundedQuantifiedExpression(quantifier, binders, body)
+      case BoundedQuantifiedExpression(quantifier, binders, body) =>
+        BoundedQuantifiedExpression(
+          quantifier,
+          renameBV(from, to, binders, depth),
+          renameBV(from, to, body, depth)
+        )
+      case QuantifiedExpression(quantifier, binders, body) if bv(binders).contains(from) && depth > 0 =>
+        QuantifiedExpression(
+          quantifier,
+          renameBV(from, to, binders).asInstanceOf[List[Identifier]],
+          renameBV(from, to, body, depth - 1)
+        )
+      case QuantifiedExpression(quantifier, binders, body) if bv(binders).contains(from) && depth == 0 =>
+        QuantifiedExpression(quantifier, binders, body)
+      case QuantifiedExpression(quantifier, binders, body) =>
+        QuantifiedExpression(
+          quantifier,
+          renameBV(from, to, binders).asInstanceOf[List[Identifier]],
+          renameBV(from, to, body, depth)
+        )
+      case ConjunctionList(listItems) => ConjunctionList(listItems.map(renameBV(from, to, _, depth)))
+      case DisjunctionList(listItems) => DisjunctionList(listItems.map(renameBV(from, to, _, depth)))
+      case ExplicitSet(values) => ExplicitSet(values.map(renameBV(from, to, _, depth)))
+      case BoundedSetComprehension(variable, domain, predicate) if bv(variable).contains(from) && depth > 0 =>
+        BoundedSetComprehension(
+          renameBV(from, to, variable).asInstanceOf[Identifier | IdentifierTuple],
+          domain,
+          renameBV(from, to, predicate, depth - 1)
+        )
+      case BoundedSetComprehension(variable, domain, predicate) if bv(variable).contains(from) && depth == 0 =>
+        BoundedSetComprehension(variable, domain, predicate)
+      case BoundedSetComprehension(variable, domain, predicate) =>
+        BoundedSetComprehension(
+          variable,
+          renameBV(from, to, domain, depth),
+          renameBV(from, to, predicate, depth)
+        )
+      case QuantifiedSetComprehension(mappingExpression, quantifierBounds) if bv(quantifierBounds).contains(from) && depth > 0 =>
+        QuantifiedSetComprehension(
+          renameBV(from, to, mappingExpression, depth - 1),
+          renameBV(from, to, quantifierBounds, depth)
+        )
+      case QuantifiedSetComprehension(mappingExpression, quantifierBounds) if bv(quantifierBounds).contains(from) && depth == 0 =>
+        QuantifiedSetComprehension(mappingExpression, quantifierBounds)
+      case QuantifiedSetComprehension(mappingExpression, quantifierBounds) =>
+        QuantifiedSetComprehension(
+          renameBV(from, to, mappingExpression, depth),
+          renameBV(from, to, quantifierBounds, depth)
+        )
+      case ExplicitFunction(mappings) => ExplicitFunction(mappings.map(renameBV(from, to, _, depth).asInstanceOf[Mapping]))
+      case BoundedMapping(quantifierBounds, expression) if bv(quantifierBounds).contains(from) && depth > 0 =>
+        BoundedMapping(
+          renameBV(from, to, quantifierBounds, depth),
+          renameBV(from, to, expression, depth - 1)
+        )
+      case BoundedMapping(quantifierBounds, expression) if bv(quantifierBounds).contains(from) && depth == 0 =>
+        BoundedMapping(quantifierBounds, expression)
+      case BoundedMapping(quantifierBounds, expression) =>
+        BoundedMapping(
+          renameBV(from, to, quantifierBounds, depth),
+          renameBV(from, to, expression, depth)
+        )
+      case SetOfAllFunctions(domain, codomain) => SetOfAllFunctions(renameBV(from, to, domain, depth), renameBV(from, to, codomain, depth))
+      case SetOfAllRecords(mappings) => SetOfAllRecords(mappings.map(renameBV(from, to, _, depth).asInstanceOf[Mapping]))
+      case ExceptExpression(exceptTarter, clauses) =>
+        ExceptExpression(
+          renameBV(from, to, exceptTarter, depth),
+          clauses.map(clause => ExceptClause(
+            SelectorPath(clause.selector.parts.map {
+              case dotSelector: DotSelector => dotSelector
+              case indexSelector: IndexSelector => IndexSelector(indexSelector.indices.map(expr => renameBV(from, to, expr, depth)))
+            }),
+            renameBV(from, to, clause.value, depth)
+        )))
+      // The following expressions are simply returned unchanged
+      case genIdentifier: GeneralIdentifier => genIdentifier
+      case ws: WeakStuttering => ws
+      case ss: StrongStuttering => ss
+      case wf: WeakFairness => wf
+      case sf: StrongFairness => sf
+      case at: AtSign => at
+    }
+  }
+
+  /**
+   * Interprets the input variable (or variables) as bound variables and returns them as a set.
+   */
+  private def bv(variable: Identifier | List[Identifier] | IdentifierTuple): immutable.Set[Identifier] = {
+    variable match {
+      case identifier: Identifier => Set(identifier)
+      case identifiers: List[Identifier] => identifiers.toSet
+      case tuple: IdentifierTuple => tuple.identifiers.toSet
+    }
+  }
+
+  /**
+   * Returns a set with the bound variables of a quantifier bound.
+   */
+  private def bv(qb: QuantifierBound): immutable.Set[Identifier] = bv(qb.variable)
+
+  /**
+   * Returns a set with the bound variables of a list of quantifier bounds.
+   */
+  private def bv(qbs: List[QuantifierBound]): immutable.Set[Identifier] = qbs.toSet.flatMap(bv)
+
+  /**
+   * Small utility method for the creation of unique identifiers.
+   * For an input identifier, we check iteratively if we have already seen it
+   * or a version of it with an index after the name. (E.g. x, x1, x2, ...)
+   * Once we find a new unique identifier, we add it to the known identifiers set
+   * and we return it.
+   */
+  private def getUniqueIdentifier(identifier: Identifier): Identifier = {
+    var idx = 0;
+    var tempIdentifier = identifier
+    // We check if we have already seen this identifier.
+    // If yes, we increment the counter and check for the next one.
+    while (knownIdentifiers contains tempIdentifier) {
+      idx += 1
+      tempIdentifier = Identifier(s"${identifier.name}${idx.toString}")
+    }
+    // Once we found a new identifier, we add it to the known identifiers set.
+    knownIdentifiers addOne tempIdentifier
+    // And we return the identifier to the caller.
+    tempIdentifier
   }
 }
