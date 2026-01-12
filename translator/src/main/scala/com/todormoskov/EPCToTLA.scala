@@ -218,7 +218,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
                             // This is the region of the (location, thread)-pair.
                             epcCtx.locThdEnumsToOperations((locEnum, thdEnum))._1
                           ) match {
-                            case Some(operation) => getOperationLabel(locEnum, thdEnum, operation, getOperationSuffix(operation))
+                            case Some(operation) => getOperationLabel(Some(locEnum), Some(thdEnum), None, operation, None)
                             case None => DONE
                           }
                         )
@@ -648,7 +648,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
                                  edges: List[DiEdge],
                                  locationVariables: List[Identifier],
                                  allTLAVariables: List[Identifier]): List[OperatorDefinition] = {
-    val currentLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, getOperationSuffix(operation))
+    val currentLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, None)
     val pcEnablingCondition = PCEnablingCondition(currentLabel)
     operation match {
       case LeafOperation(id, label, command) =>
@@ -695,7 +695,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
               ))
             )
             ++ Option.when(epcCtx.weakAccuracyConfigured) ({
-              val suspectActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, "Susp")
+              val suspectActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, Some("Susp"))
               OperatorDefinition(NonFixLHS(Identifier(suspectActionLabel), List(self, thd)), ConjunctionList(
                 List(pcEnablingCondition)
                   ++ generateSuspectEffect(location, locationVariables)
@@ -729,7 +729,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           case ThreadInstantiation(identifier) =>
             // With thread instantiations, the successor label can only be determined correctly using the thread identifier.
             val definedThreadEntryOperation = getDefinedThreadEntryOperation(epcCtx.thdDefinitionsToOperations(identifier))
-            val threadEntryOperationLabel = getSuccessorLabel(identifier, definedThreadEntryOperation)
+            val threadEntryOperationLabel = getSuccessorLabel(None, None, Some(identifier), definedThreadEntryOperation)
             val freeVariables = epcCtx.thdDefinitionsToFreeVariables(identifier)
             List(
               OperatorDefinition(NonFixLHS(Identifier(currentLabel), List(self, thd)), ConjunctionList(
@@ -750,8 +750,8 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
 
       case IfOperation(id, label, condition, thenRegion, elseRegion) =>
         // Get the "then" and "else" action labels.
-        val thenActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, "T")
-        val elseActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, "F")
+        val thenActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, Some("T"))
+        val elseActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, Some("F"))
         // Calculate the "then" and "else" successors and their labels.
         val thenSuccessor = getSuccessorByEdgeLabel(operation, flattenedRegion, edges, "then")
         val elseSuccessor = getSuccessorByEdgeLabel(operation, flattenedRegion, edges, "else")
@@ -808,57 +808,47 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
                                 thdEnumOption: Option[Enumerator],
                                 threadIdentifierOption: Option[Identifier],
                                 operation: Operation,
-                                operationSuffix: String): String = {
+                                nonStandardSuffix: Option[String]): String = {
     if (locEnumOption.isDefined && thdEnumOption.isDefined && threadIdentifierOption.isEmpty) {
-      return getOperationLabel(locEnumOption.get, thdEnumOption.get, operation, operationSuffix)
+      return getOperationLabel(locEnumOption.get, thdEnumOption.get, operation, nonStandardSuffix)
     }
     if (locEnumOption.isEmpty && thdEnumOption.isEmpty && threadIdentifierOption.isDefined) {
-      return getOperationLabel(threadIdentifierOption.get, operation, operationSuffix)
+      return getOperationLabel(threadIdentifierOption.get, operation, nonStandardSuffix)
     }
     ""
   }
 
-  private def getOperationLabel(locEnum: Enumerator, thdEnum: Enumerator, operation: Operation, operationSuffix: String): String =
+  private def getOperationLabel(locEnum: Enumerator, thdEnum: Enumerator, operation: Operation, nonStandardSuffix: Option[String]): String =
     operation.label match {
-      case Some(value) => value.name
+      case Some(value) => value.name + nonStandardSuffix.getOrElse("")
       // If there is no label, we create one using the location identifier, thread identifier, operation id and suffix.
       // E.g. p_j_1A, p_j_2R, p_j_3S, ...
       case None => "%s_%s_%d%s" format(
         locEnum.asInstanceOf[BoundedEnumerator].name.name,
         thdEnum.asInstanceOf[BoundedEnumerator].name.name,
         operation.id,
-        operationSuffix
+        nonStandardSuffix.getOrElse(getOperationSuffix(operation))
       )
     }
 
-  private def getOperationLabel(thdIdentifier: Identifier, operation: Operation, operationSuffix: String): String =
+  private def getOperationLabel(thdIdentifier: Identifier, operation: Operation, nonStandardSuffix: Option[String]): String =
     operation.label match {
-      case Some(value) => value.name
-      case None => "%s_%d%s" format(thdIdentifier.name, operation.id, operationSuffix)
+      case Some(value) => value.name + nonStandardSuffix.getOrElse("")
+      case None => "%s_%d%s" format(thdIdentifier.name, operation.id, nonStandardSuffix.getOrElse(getOperationSuffix(operation)))
     }
 
   private def getSuccessorLabel(locEnumOption: Option[Enumerator],
                                 thdEnumOption: Option[Enumerator],
                                 threadIdentifierOption: Option[Identifier],
-                                successorOption: Option[Operation]): String = {
-    if (locEnumOption.isDefined && thdEnumOption.isDefined && threadIdentifierOption.isEmpty) {
-      return getSuccessorLabel(locEnumOption.get, thdEnumOption.get, successorOption)
-    }
-    if (locEnumOption.isEmpty && thdEnumOption.isEmpty && threadIdentifierOption.isDefined) {
-      return getSuccessorLabel(threadIdentifierOption.get, successorOption)
-    }
-    ""
-  }
-
-  private def getSuccessorLabel(locEnum: Enumerator, thdEnum: Enumerator, successorOption: Option[Operation]): String =
+                                successorOption: Option[Operation]): String =
     successorOption match {
-      case Some(successorOperation) => getOperationLabel(locEnum, thdEnum, successorOperation, getOperationSuffix(successorOperation))
-      case None => DONE
-    }
-
-  private def getSuccessorLabel(thdIdentifier: Identifier, successorOption: Option[Operation]): String =
-    successorOption match {
-      case Some(successorOperation) => getOperationLabel(thdIdentifier, successorOperation, getOperationSuffix(successorOperation))
+      case Some(successorOperation) => getOperationLabel(
+        locEnumOption,
+        thdEnumOption,
+        threadIdentifierOption,
+        successorOperation,
+        None
+      )
       case None => DONE
     }
 
