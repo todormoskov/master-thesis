@@ -575,7 +575,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     ) match {
       case Nil => ???
       case head :: Nil => head
-      case head :: next => next.fold(head)((expr1: Expression, expr2: Expression) => BinaryExpression("\\/", expr1, expr2))
+      case list: List[IdentifierApplication] => DisjunctionList(list)
     }
   }
 

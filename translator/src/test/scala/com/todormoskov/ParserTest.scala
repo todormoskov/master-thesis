@@ -1597,6 +1597,125 @@ class ParserTest extends AnyFunSuite {
     )
   }
 
+  test("Parses conjunction lists (1)") {
+    val inputSpec =
+      """/\ x = 11
+        |/\ y = 12""".stripMargin
+    new Parser(Tokenizer(Scanner(inputSpec))).parseExpression() match {
+      case Right(ast) =>
+        assert(ast == ConjunctionList(List(
+          BinaryExpression("=", Identifier("x"), Literal(11)),
+          BinaryExpression("=", Identifier("y"), Literal(12))
+        )))
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Parses conjunction lists (2)") {
+    val inputSpec =
+      """/\ x = 11
+        | /\ y = 12""".stripMargin
+    new Parser(Tokenizer(Scanner(inputSpec))).parseExpression() match {
+      case Right(ast) =>
+        assert(ast == ConjunctionList(List(
+          BinaryExpression("/\\",
+            BinaryExpression("=", Identifier("x"), Literal(11)),
+            BinaryExpression("=", Identifier("y"), Literal(12))
+          )
+        )))
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Parses conjunction lists (3)") {
+    val inputSpec =
+      """ /\ x = 11
+        |/\ y = 12""".stripMargin
+    new Parser(Tokenizer(Scanner(inputSpec))).parseExpression() match {
+      case Right(ast) =>
+        assert(ast == ConjunctionList(List(
+          BinaryExpression("/\\",
+            BinaryExpression("=", Identifier("x"), Literal(11)),
+            BinaryExpression("=", Identifier("y"), Literal(12))
+          )
+        )))
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Parses conjunction lists (4)") {
+    val inputSpec =
+      """/\ /\ A
+        |   /\ B
+        |/\ C""".stripMargin
+    new Parser(Tokenizer(Scanner(inputSpec))).parseExpression() match {
+      case Right(ast) =>
+        assert(ast == ConjunctionList(List(
+          ConjunctionList(List(
+            Identifier("A"),
+            Identifier("B")
+          )),
+          Identifier("C")
+        )))
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Parses conjunction lists (5)") {
+    val inputSpec =
+      """/\ /\ A
+        |   /\ B
+        |/\ /\ C
+        |   /\ D""".stripMargin
+    new Parser(Tokenizer(Scanner(inputSpec))).parseExpression() match {
+      case Right(ast) =>
+        assert(ast == ConjunctionList(List(
+          ConjunctionList(List(
+            Identifier("A"),
+            Identifier("B")
+          )),
+          ConjunctionList(List(
+            Identifier("C"),
+            Identifier("D")
+          )),
+        )))
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Parses conjunction lists (6)") {
+    val inputSpec =
+      """/\ \/ /\ A
+        |      /\ B
+        |   \/ /\ C
+        |      /\ D
+        |/\ \/ E
+        |   \/ F
+        |/\ G   """.stripMargin
+    new Parser(Tokenizer(Scanner(inputSpec))).parseExpression() match {
+      case Right(ast) =>
+        assert(ast == ConjunctionList(List(
+          DisjunctionList(List(
+            ConjunctionList(List(
+              Identifier("A"),
+              Identifier("B")
+            )),
+            ConjunctionList(List(
+              Identifier("C"),
+              Identifier("D")
+            )),
+          )),
+          DisjunctionList(List(
+            Identifier("E"),
+            Identifier("F")
+          )),
+          Identifier("G")
+        )))
+      case Left(value) => fail(value)
+    }
+  }
+
+
   test("Parses weak-stuttering nodes") {
     val inputSpec =
       """[x' = x + 1]_x""".stripMargin

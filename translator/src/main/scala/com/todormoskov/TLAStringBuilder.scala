@@ -247,7 +247,7 @@ class TLAStringBuilder {
             appendNewline()
             appendString(" ".repeat(disjunctionListIndentation))
           }
-          appendString("/\\ ")
+          appendString("\\/ ")
           appendExpression(expression)
         })
       case ExplicitSet(values) =>

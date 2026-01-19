@@ -2,6 +2,7 @@ package com.todormoskov
 
 import com.todormoskov.Lexer.*
 
+import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
 sealed trait AST
@@ -1001,6 +1002,25 @@ class Parser(lexer: Tokenizer) {
   } yield finalResult
 
   /**
+   * A stack of AND/OR tokens that begin a conjunction/disjunction list.
+   * We add these tokens to the stack, in order to know on which column the conjunction list starts.
+   * This allows us to decide if an AND/OR token we encounter is a new conjunct of a conjunction list
+   * or if it is part of the current expression.
+   *
+   * We push AND/OR tokens to the stack if they are the first symbol of a primary expression.
+   * We pop the top token, when we finish parsing a conjunction or disjunction list.
+   *
+   * When we parse a normal conjunction or disjunction, we make sure that the current AND/OR token
+   * is not the beginning of a conjunct in the conjunction list.
+   *
+   * E.g. /\ ... <-- this /\ will be pushed onto the stack
+   *      /\ \/ ... <-- this \/ will be pushed onto the stack
+   *         \/ ...
+   *      /\ ...
+   */
+  private val conjunctionStack: mutable.Stack[Token] = mutable.Stack.empty[Token]
+
+  /**
    * Parse a binary conjunction or disjunction.
    * Conjunctions and disjunctions have precedence range 3-3 and are left-associative.
    *
@@ -1013,11 +1033,13 @@ class Parser(lexer: Tokenizer) {
     finalResult <- {
       def loop(lhs: Expression): Either[String, Expression] =
         lexer.peek() match {
-          case Token(kind, value, _, _) if kind == TokenKind.AND || kind == TokenKind.OR => for {
-            _ <- consume(kind)
-            rhs <- parsePrefixOperatorsWithPrecedenceRange4()
-            intermediateResult <- loop(BinaryExpression(value, lhs, rhs))
-          } yield intermediateResult
+          case Token(kind, value, line, column)
+            if (kind == TokenKind.AND || kind == TokenKind.OR) && conjunctionStack.forall(_.column != column) =>
+            for {
+              _ <- consume(kind)
+              rhs <- parsePrefixOperatorsWithPrecedenceRange4()
+              intermediateResult <- loop(BinaryExpression(value, lhs, rhs))
+            } yield intermediateResult
           case _ => Right(lhs)
         }
 
@@ -1404,6 +1426,10 @@ class Parser(lexer: Tokenizer) {
       then for _ <- consume(TokenKind.AT) yield AtSign()
     else if check(TokenKind.CASE)
       then for caseExpr <- parseCaseExpression() yield caseExpr
+    else if check(TokenKind.AND)
+      then for conjunctionList <- parseConjunctionList() yield conjunctionList
+    else if check(TokenKind.OR)
+      then for disjunctionList <- parseDisjunctionList() yield disjunctionList
     else Left(error("TLA+ Expression expected"))
 
   /**
@@ -2080,6 +2106,89 @@ class Parser(lexer: Tokenizer) {
     Right(caseArms.toList)
   }
 
+  /**
+   * Parse a conjunction list.
+   *
+   * E.g. /\ x = 10
+   *      /\ y = 11
+   *
+   * E.g. for nested conjunction lists:
+   * /\ /\ A
+   *    /\ B
+   * /\ /\ C
+   *    /\ D
+   */
+  private def parseConjunctionList(): Either[String, ConjunctionList] =
+    val conjuncts = new ListBuffer[Expression]
+    while {
+      lexer.peek() match {
+        case token@Token(TokenKind.AND, value, line, column)
+          if !conjunctionStack.exists(t => t.kind == TokenKind.AND && t.column == column)
+          // If this is the first AND token of a new conjunction list,
+          // we push it onto the stack and continue with the loop.
+          => conjunctionStack.push(token); true
+        case token@Token(TokenKind.AND, value, line, column)
+          if conjunctionStack.headOption.exists(top => top.kind == token.kind && top.column == token.column)
+          // If this is an AND token, which is on the same column as the first
+          // AND token of the current conjunction list, we continue with the loop.
+          => true
+        case _ => false
+      }
+    } do {
+      (for {_ <- consume(TokenKind.AND); conjunct <- parseExpression() } yield conjunct) match {
+        case Right(value) => conjuncts addOne value
+        case Left(value) => {
+          // If we fail to parse an expression, we also pop the top element of the stack to "clean it up".
+          conjunctionStack.pop()
+          return Left(value)
+        }
+      }
+    }
+    // Pop the top element of the conjunction stack to remove the conjunction list from the stack.
+    conjunctionStack.pop()
+    Right(ConjunctionList(conjuncts.toList))
+
+  /**
+   * Parse a disjunction list.
+   *
+   * E.g. \/ x = 10
+   *      \/ y = 11
+   *
+   * E.g. for nested disjunction lists:
+   * \/ \/ A
+   *    \/ B
+   * \/ \/ C
+   *    \/ D
+   */
+  private def parseDisjunctionList(): Either[String, DisjunctionList] =
+    val disjuncts = new ListBuffer[Expression]
+    while {
+      lexer.peek() match {
+        case token@Token(TokenKind.OR, value, line, column)
+          if !conjunctionStack.exists(t => t.kind == TokenKind.OR && t.column == column)
+          // If this is the first OR token of a new disjunction list,
+          // we push it onto the stack and continue with the loop.
+        => conjunctionStack.push(token); true
+        case token@Token(TokenKind.OR, value, line, column)
+          if conjunctionStack.headOption.exists(top => top.kind == token.kind && top.column == token.column)
+          // If this is an OR token, which is on the same column as the first
+          // OR token of the current disjunction list, we continue with the loop.
+        => true
+        case _ => false
+      }
+    } do {
+      (for {_ <- consume(TokenKind.OR); disjunct <- parseExpression()} yield disjunct) match {
+        case Right(value) => disjuncts addOne value
+        case Left(value) => {
+          // If we fail to parse an expression, we also pop the top element of the stack to "clean it up".
+          conjunctionStack.pop()
+          return Left(value)
+        }
+      }
+    }
+    // Pop the top element of the conjunction stack to remove the disjunction list from the stack.
+    conjunctionStack.pop()
+    Right(DisjunctionList(disjuncts.toList))
 
   /*********************************************************************************************************************
    *  EPC Specifications.
