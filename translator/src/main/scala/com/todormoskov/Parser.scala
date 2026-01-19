@@ -1996,20 +1996,27 @@ class Parser(lexer: Tokenizer) {
   private def parseTupleOrStrongStuttering(): Either[String, Expression] =
     for {
       _ <- consume(TokenKind.LEFT_ANGLE_BRACKET)
-      firstExpression <- parseExpression()
-      result <- if check(List(TokenKind.RIGHT_ANGLE_BRACKET, TokenKind.UNDERSCORE)) then for {
-          _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
-          _ <- consume(TokenKind.UNDERSCORE)
-          stateExpression <- parseExpression()
-        } yield StrongStuttering(firstExpression, stateExpression)
-        else if check(TokenKind.RIGHT_ANGLE_BRACKET) then for {
-          _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
-        } yield Tuple(List(firstExpression))
+      result <- {
+        // If we directly see the closing bracket, we know that this is an empty tuple, so we return it
+        if check(TokenKind.RIGHT_ANGLE_BRACKET)
+        then for _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET) yield Tuple(Nil)
         else for {
-          _ <- consume(TokenKind.COMMA)
-          tailExpressions <- parseCommaListOfExpressions()
-          _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
-        } yield Tuple(List(firstExpression) ++ tailExpressions)
+          firstExpression <- parseExpression()
+          nonEmptyResult <- if check(List(TokenKind.RIGHT_ANGLE_BRACKET, TokenKind.UNDERSCORE)) then for {
+            _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
+            _ <- consume(TokenKind.UNDERSCORE)
+            stateExpression <- parseExpression()
+          } yield StrongStuttering(firstExpression, stateExpression)
+          else if check(TokenKind.RIGHT_ANGLE_BRACKET) then for {
+            _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
+          } yield Tuple(List(firstExpression))
+          else for {
+            _ <- consume(TokenKind.COMMA)
+            tailExpressions <- parseCommaListOfExpressions()
+            _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
+          } yield Tuple(List(firstExpression) ++ tailExpressions)
+        } yield nonEmptyResult
+      }
     } yield result
 
   /**
