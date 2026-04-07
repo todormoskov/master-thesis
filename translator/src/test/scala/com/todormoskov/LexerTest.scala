@@ -1288,6 +1288,20 @@ class LexerTest extends AnyFunSuite {
     )
   }
 
+  test("Recognizes EPC suspicious channel definitions") {
+    val inputSpec =
+      """suspchan c""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.EPC_SUSPCHAN, "suspchan", 1, 1),
+        Token(TokenKind.IDENTIFIER, "c", 1, 10),
+        Token(TokenKind.EOF, null, 1, 11)
+      )
+    )
+  }
+
   test("Recognizes EPC receiving a message on a channel") {
     val inputSpec =
       """c@2?(x)""".stripMargin
@@ -1303,6 +1317,33 @@ class LexerTest extends AnyFunSuite {
         Token(TokenKind.IDENTIFIER, "x", 1, 6),
         Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 7),
         Token(TokenKind.EOF, null, 1, 8)
+      )
+    )
+  }
+
+  test("Recognizes EPC choices of multiple receive actions") {
+    val inputSpec =
+      """c@1?(x) + c@2?(x)""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens ==
+      List(
+        Token(TokenKind.IDENTIFIER, "c", 1, 1),
+        Token(TokenKind.AT, "@", 1, 2),
+        Token(TokenKind.INTEGER, "1", 1, 3),
+        Token(TokenKind.QUESTION_MARK, "?", 1, 4),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 5),
+        Token(TokenKind.IDENTIFIER, "x", 1, 6),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 7),
+        Token(TokenKind.PLUS, "+", 1, 9),
+        Token(TokenKind.IDENTIFIER, "c", 1, 11),
+        Token(TokenKind.AT, "@", 1, 12),
+        Token(TokenKind.INTEGER, "2", 1, 13),
+        Token(TokenKind.QUESTION_MARK, "?", 1, 14),
+        Token(TokenKind.LEFT_ROUND_BRACKET, "(", 1, 15),
+        Token(TokenKind.IDENTIFIER, "x", 1, 16),
+        Token(TokenKind.RIGHT_ROUND_BRACKET, ")", 1, 17),
+        Token(TokenKind.EOF, null, 1, 18)
       )
     )
   }

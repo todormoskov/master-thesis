@@ -2096,6 +2096,16 @@ class ParserTest extends AnyFunSuite {
     )
   }
 
+  test("Parses suspicious channel definitions") {
+    val inputSpec =
+      """suspchan c1, c2""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseSuspiciousChannelDefinition().toOption.get
+    assert(ast ==
+      SuspiciousChannelDefinition(List(Identifier("c1"), Identifier("c2")))
+    )
+  }
+
   test("Parses travelling messages") {
     val inputSpec =
       """c_{1 -> 2}<< "Hello" >>""".stripMargin
@@ -2295,6 +2305,38 @@ class ParserTest extends AnyFunSuite {
         Identifier("c"),
         Literal(2),
         Identifier("x")
+      )
+    )
+  }
+
+  test("Parses choices of multiple actions") {
+    val inputSpec = """c1@1?(x) + c2@2?(x)""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseChoice().toOption.get
+    assert(ast == Choice(List(
+          Receive(
+            Identifier("c1"),
+            Literal(1),
+            Identifier("x")
+          ),
+          Receive(
+            Identifier("c2"),
+            Literal(2),
+            Identifier("x")
+          )
+        )
+      )
+    )
+  }
+
+  test("Parses choices of multiple actions, given as an indexed sum") {
+    val inputSpec = """(j \in 1..2) c1@j?(x)""".stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseIndexedSumChoice().toOption.get
+    assert(ast ==
+      IndexedSumChoice(
+        BoundedEnumerator(Identifier("j"), "\\in", BinaryExpression("..", Literal(1), Literal(2))),
+        Receive(Identifier("c1"), Identifier("j"), Identifier("x"))
       )
     )
   }
@@ -2935,17 +2977,17 @@ class ParserTest extends AnyFunSuite {
         | new c
         |
         | (l \in 1..n) [[
-        |   [ chan |-> c,
+        |   [ channel |-> c,
         |     x |-> input[l],
         |     r |-> 0,
         |     output |-> Initialized ] <| (j = 1) ( L() ) ]]
         |
-        | def L(chan, x, r, output) =
+        | def L(channel, x, r, output) =
         |   << r := r + 1 >>;
         |   if r <= n
         |     then if self = r
-        |             then {{ ( j \in 1..n : j # self) chan@j<< x >> }}; L()
-        |             else chan@r?(x); L()
+        |             then {{ ( j \in 1..n : j # self) channel@j<< x >> }}; L()
+        |             else channel@r?(x); L()
         |          fi
         |     else << output := x>>
         |   fi
@@ -2953,156 +2995,157 @@ class ParserTest extends AnyFunSuite {
         |*)
         |""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseEPCSpec().toOption.get
-    assert(ast ==
-      EPCSpec(
-        Identifier("Consensus"),
-        Nil,
-        List(
-          ChannelDefinition(
-            Identifier("c")
-          ),
-          Location(
-            BoundedEnumerator(
-              Identifier("l"),
-              "\\in",
-              BinaryExpression(
-                "..",
-                Literal(1),
-                Identifier("n")
-              )
+    new Parser(Tokenizer(Scanner(inputSpec))).parseEPCSpec() match {
+      case Right(ast) => assert(ast ==
+        EPCSpec(
+          Identifier("Consensus"),
+          Nil,
+          List(
+            ChannelDefinition(
+              Identifier("c")
             ),
-            Process(
-              ExplicitFunction(
-                List(
-                  Mapping(Identifier("chan"), Identifier("c")),
-                  Mapping(
-                    Identifier("x"),
-                    FunctionApplication(
-                      Identifier("input"),
-                      List(
-                        Identifier("l")
+            Location(
+              BoundedEnumerator(
+                Identifier("l"),
+                "\\in",
+                BinaryExpression(
+                  "..",
+                  Literal(1),
+                  Identifier("n")
+                )
+              ),
+              Process(
+                ExplicitFunction(
+                  List(
+                    Mapping(Identifier("channel"), Identifier("c")),
+                    Mapping(
+                      Identifier("x"),
+                      FunctionApplication(
+                        Identifier("input"),
+                        List(
+                          Identifier("l")
+                        )
                       )
-                    )
-                  ),
-                  Mapping(Identifier("r"), Literal(0)),
-                  Mapping(Identifier("output"), Identifier("Initialized"))
-                )
-              ),
-              ThreadComprehension(
-                BoundedEnumerator(
-                  Identifier("j"),
-                  "=",
-                  Literal(1)
+                    ),
+                    Mapping(Identifier("r"), Literal(0)),
+                    Mapping(Identifier("output"), Identifier("Initialized"))
+                  )
                 ),
-                List(
-                  ThreadUnit(
-                    None,
-                    ThreadInstantiation(Identifier("L"))
-                  )
-                )
-              )
-            )
-          ),
-          ThreadDefinition(
-            Identifier("L"),
-            List(
-              Identifier("chan"),
-              Identifier("x"),
-              Identifier("r"),
-              Identifier("output")
-            ),
-            List(
-              ThreadUnit(
-                None,
-                Assignment(
-                  Identifier("r"),
-                  BinaryExpression(
-                    "+",
-                    Identifier("r"),
+                ThreadComprehension(
+                  BoundedEnumerator(
+                    Identifier("j"),
+                    "=",
                     Literal(1)
-                  )
-                )
-              ),
-              ThreadUnit(
-                None,
-                ConditionalThread(
-                  BinaryExpression(
-                    "<=",
-                    Identifier("r"),
-                    Identifier("n")
                   ),
                   List(
                     ThreadUnit(
                       None,
-                      ConditionalThread(
-                        BinaryExpression(
-                          "=",
-                          Identifier("self"),
-                          Identifier("r"),
-                        ),
-                        List(
-                          ThreadUnit(
-                            None,
-                            Send(
-                              // {{ ( j \in 1..n : i # self) chan@j<< x >> }}
-                              QuantifiedMultiSet(
-                                BoundedEnumeratorWithFilter(
-                                  Identifier("j"),
-                                  "\\in",
-                                  BinaryExpression(
-                                    "..",
-                                    Literal(1),
-                                    Identifier("n")
-                                  ),
-                                  BinaryExpression(
-                                    "#",
+                      ThreadInstantiation(Identifier("L"))
+                    )
+                  )
+                )
+              )
+            ),
+            ThreadDefinition(
+              Identifier("L"),
+              List(
+                Identifier("channel"),
+                Identifier("x"),
+                Identifier("r"),
+                Identifier("output")
+              ),
+              List(
+                ThreadUnit(
+                  None,
+                  Assignment(
+                    Identifier("r"),
+                    BinaryExpression(
+                      "+",
+                      Identifier("r"),
+                      Literal(1)
+                    )
+                  )
+                ),
+                ThreadUnit(
+                  None,
+                  ConditionalThread(
+                    BinaryExpression(
+                      "<=",
+                      Identifier("r"),
+                      Identifier("n")
+                    ),
+                    List(
+                      ThreadUnit(
+                        None,
+                        ConditionalThread(
+                          BinaryExpression(
+                            "=",
+                            Identifier("self"),
+                            Identifier("r"),
+                          ),
+                          List(
+                            ThreadUnit(
+                              None,
+                              Send(
+                                // {{ ( j \in 1..n : i # self) channel@j<< x >> }}
+                                QuantifiedMultiSet(
+                                  BoundedEnumeratorWithFilter(
                                     Identifier("j"),
-                                    Identifier("self")
+                                    "\\in",
+                                    BinaryExpression(
+                                      "..",
+                                      Literal(1),
+                                      Identifier("n")
+                                    ),
+                                    BinaryExpression(
+                                      "#",
+                                      Identifier("j"),
+                                      Identifier("self")
+                                    )
+                                  ),
+                                  OutgoingMessage(
+                                    Identifier("channel"),
+                                    Identifier("j"),
+                                    Identifier("x")
                                   )
-                                ),
-                                OutgoingMessage(
-                                  Identifier("chan"),
-                                  Identifier("j"),
-                                  Identifier("x")
                                 )
+                              )
+                            ),
+                            ThreadUnit(
+                              None,
+                              ThreadInstantiation(
+                                Identifier("L")
                               )
                             )
                           ),
-                          ThreadUnit(
-                            None,
-                            ThreadInstantiation(
-                              Identifier("L")
-                            )
-                          )
-                        ),
-                        // chan@r?(x); L()
-                        List(
-                          ThreadUnit(
-                            None,
-                            Receive(
-                              Identifier("chan"),
-                              Identifier("r"),
-                              Identifier("x")
-                            )
-                          ),
-                          ThreadUnit(
-                            None,
-                            ThreadInstantiation(
-                              Identifier("L")
+                          // channel@r?(x); L()
+                          List(
+                            ThreadUnit(
+                              None,
+                              Receive(
+                                Identifier("channel"),
+                                Identifier("r"),
+                                Identifier("x")
+                              )
+                            ),
+                            ThreadUnit(
+                              None,
+                              ThreadInstantiation(
+                                Identifier("L")
+                              )
                             )
                           )
                         )
                       )
-                    )
-                  ),
-                  // << output := x >>
-                  List(
-                    ThreadUnit(
-                      None,
-                      Assignment(
-                        Identifier("output"),
-                        Identifier("x")
+                    ),
+                    // << output := x >>
+                    List(
+                      ThreadUnit(
+                        None,
+                        Assignment(
+                          Identifier("output"),
+                          Identifier("x")
+                        )
                       )
                     )
                   )
@@ -3112,7 +3155,8 @@ class ParserTest extends AnyFunSuite {
           )
         )
       )
-    )
+      case Left(value) => fail(value)
+    }
   }
 
 

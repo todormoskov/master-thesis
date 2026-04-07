@@ -18,13 +18,19 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   private val INITIALIZED = "Initialized"
   private val PROC_SET = "ProcSet"
   private val THREAD_SET = "ThreadSet"
+  private val CHAN_SET = "ChanSet"
+  private val SUSP_CHAN_SET = "SuspChanSet"
   private val SELF = "self"
   private val THD = "thd"
+  private val CHAN = "_chan"
+  private val SUSPCHAN = "_suspchan"
+  private val TRUSTED_IMMORTAL = "trim"
+  private val FAILED_SET = "F"
+  private val _AE = "AE"
+  private val _O = "O"
+  private val _D = "D"
   private val PC = "pc"
   private val RA = "ra"
-  private val _O = "O"
-  private val FAILED_SET = "F"
-  private val TRUSTED_IMMORTAL = "trim"
   private val DONE = "Done"
   private val VARS = "vars"
   private val INIT = "Init"
@@ -41,13 +47,19 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   private val Initialized = Identifier(INITIALIZED)
   private val ProcSet = Identifier(PROC_SET)
   private val ThreadSet = Identifier(THREAD_SET)
+  private val ChanSet = Identifier(CHAN_SET)
+  private val SuspChanSet = Identifier(SUSP_CHAN_SET)
   private val self = Identifier(SELF)
   private val thd = Identifier(THD)
+  private val chan = Identifier(CHAN)
+  private val suspchan = Identifier(SUSPCHAN)
+  private val trim = Identifier(TRUSTED_IMMORTAL)
+  private val F = Identifier(FAILED_SET)
+  private val AE = Identifier(_AE)
+  private val O = Identifier(_O)
+  private val D = Identifier(_D)
   private val pc = Identifier(PC)
   private val ra = Identifier(RA)
-  private val O = Identifier(_O)
-  private val F = Identifier(FAILED_SET)
-  private val trim = Identifier(TRUSTED_IMMORTAL)
   private val Done = Literal(DONE)
   private val vars = Identifier(VARS)
   private val Init = Identifier(INIT)
@@ -63,6 +75,8 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   private val SetToBag = Identifier(SET_TO_BAG)
   private val selfInProcSet = QuantifierBound(self, ProcSet)
   private val thdInThreadSetSelf = QuantifierBound(thd, FunctionApplication(ThreadSet, List(self)))
+  private val chanInChanSet = QuantifierBound(chan, ChanSet)
+  private val suspchanInSuspChanSet = QuantifierBound(suspchan, SuspChanSet)
   private val pcThreadValue = ThdLvlFnAppl(pc)
 
   // Helper methods
@@ -73,22 +87,31 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
    * Entry method for the translation of the EPC spec to TLA+.
    */
   def translateSpec(): TLAStringBuilder = {
-    // We add the constants Undefined and Initialized.
+    // We check if there are defined channels, if yes, we need to generate the channel names as constants!
+    val declaredChannels = epcCtx.channels.toList
+    val declaredSuspiciousChannels = epcCtx.suspiciousChannels.toList
+
+    // We add the constants Undefined and Initialized
+    // Besides these values, all channels are also translated as constants
     val constants = ConstantDeclaration(Token(TokenKind.CONSTANTS, CONSTANTS, -1, -1),
-      List(OperatorDeclaration(Undefined, Nil), OperatorDeclaration(Initialized, Nil)))
+      List(OperatorDeclaration(Undefined, Nil), OperatorDeclaration(Initialized, Nil))
+      ++ declaredChannels.map(channel => OperatorDeclaration(channel, Nil))
+    )
     tlaStringBuilder.appendUnit(constants, newlines = 2)
 
     // We generate the variable declarations. This includes the declaration of all variables
     // which appear in the memory of a location or are declared with the 'var' keyword.
     // Additionally, we create a variable for the program counters (pc) of the different locations
     // and their threads. Finally, we create variables for each channel, with the same name as the channel.
-    val raOption = Option.when(epcCtx.thdDefinitionsToOperations.nonEmpty)(ra)
-    val OOption = Option.when(epcCtx.specWithMultiSends)(O)
-    val FOption = Option.when(epcCtx.failStopConfigured) (F)
     val trimOption = Option.when(epcCtx.weakAccuracyConfigured) (trim)
+    val FOption = Option.when(epcCtx.failStopConfigured) (F)
+    val AEOption = Option.when(declaredChannels.nonEmpty)(AE)
+    val OOption = Option.when(epcCtx.specWithMultiSends)(O)
+    val DOption = Option.when(declaredSuspiciousChannels.nonEmpty)(D)
+    val raOption = Option.when(epcCtx.thdDefinitionsToOperations.nonEmpty)(ra)
     val locationVariables = epcCtx.variablesToLocations.keys.toList
-    val declaredChannels = epcCtx.channels.toList
-    val allTLAVariables = List(pc) ++ raOption ++ OOption ++ FOption ++ trimOption ++ locationVariables ++ declaredChannels
+    val locationVariablesWithImplicitVars = locationVariables ++ DOption
+    val allTLAVariables = List() ++ trimOption ++ FOption ++ AEOption ++ OOption ++ DOption ++ List(pc) ++ raOption ++ locationVariables
     val variablesDeclaration = VariableDeclaration(Token(TokenKind.VARIABLES, VARIABLES, -1, -1), allTLAVariables)
     tlaStringBuilder.appendUnit(variablesDeclaration, newlines = 2)
     // Add all TLA variables to the set with known identifiers.
@@ -119,9 +142,29 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           CaseArm(BinaryExpression(locEnum.equalOrIn, self, locEnum.domain), expression) ).toList, None)))
     tlaStringBuilder.appendUnit(threadSetDefinition, newlines = 2)
 
+    // Add the ChanSet operator when there are defined channels
+    // ChanSet == {c1, c2, ...}
+    val chanSetOption = Option.when(declaredChannels.nonEmpty)(
+      OperatorDefinition(NonFixLHS(ChanSet, Nil), ExplicitSet(declaredChannels))
+    )
+    chanSetOption.foreach(chanSetDefinition =>
+      tlaStringBuilder.appendUnit(chanSetDefinition)
+      tlaStringBuilder.appendNewline()
+    )
+
+    // Add the SuspChanSet operator when there are defined suspicious channels
+    // SuspChanSet == {c1, c2, ...}
+    val suspChanSetOption = Option.when(declaredSuspiciousChannels.nonEmpty)(
+      OperatorDefinition(NonFixLHS(SuspChanSet, Nil), ExplicitSet(declaredSuspiciousChannels))
+    )
+    suspChanSetOption.foreach(suspChanSetDefinition =>
+      tlaStringBuilder.appendUnit(suspChanSetDefinition)
+      tlaStringBuilder.appendNewline()
+    )
+
     generateInitStatePredicate()
-    val locationOperators = translateLocations(locationVariables, allTLAVariables)
-    val threadDefinitionOperators = translateThreadDefinitions(locationVariables, allTLAVariables)
+    val locationOperators = translateLocations(locationVariablesWithImplicitVars, allTLAVariables)
+    val threadDefinitionOperators = translateThreadDefinitions(locationVariablesWithImplicitVars, allTLAVariables)
     generateRemainingSpecOperators(allTLAVariables, locationOperators, threadDefinitionOperators)
 
     tlaStringBuilder
@@ -151,32 +194,42 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
    * Generates the initial state predicate.
    */
   private def generateInitStatePredicate(): Unit = {
-    // Firstly, we generate the initial state of the pc variable.
+    // trim is variable that identifies the "Trusted Immortal" and is used when then WeakAccuracy modifier is configured.
+    val trimInitialValue = Option.when(epcCtx.weakAccuracyConfigured)(BinaryExpression("\\in", trim, ProcSet))
+
+    // F is a variable that contains failed processes and is used only when the FailStop modifier is configured.
+    val FInitialValue = Option.when(epcCtx.failStopConfigured)(BinaryExpression("=", F, emptySet))
+
+    // AE is a variable that represents the message aether and is used when there are declared channels
+    val aeInitialValue = Option.when(epcCtx.channels.nonEmpty)(generateMessageAetherInitStatePredicate())
+
+    // O variable is a function that maps processes and its threads to sets of indices (initially empty).
+    val OInitialValue = Option.when(epcCtx.specWithMultiSends)
+      (BinaryExpression("=", O, BoundedMapping(List(selfInProcSet), BoundedMapping(List(thdInThreadSetSelf), emptySet))))
+
+    // D variable is a function that maps each process to a funtion that maps
+    // suspicious channels to a function that map all locations to a boolean value
+    // This means that it has the type: ProcSet -> (SuspChanSet -> (ProcSet -> Boolean))
+    // It has the following initial value: [self \in ProcSet |-> [_suspchan \in SuspChanSet |-> [p \in ProcSet |-> TRUE]]]
+    val DInitialValue = Option.when(epcCtx.suspiciousChannels.nonEmpty)
+      (BinaryExpression("=", D, BoundedMapping(List(selfInProcSet), BoundedMapping(List(suspchanInSuspChanSet),
+        BoundedMapping(List(QuantifierBound(Identifier("p"), ProcSet)), Literal(true))
+      ))))
+
+    // pc is a variable holds the program counters of all (location, thread)-pairs
     val pcInitialValue = generatePCInitStatePredicate()
 
     // ra variable is a function that maps processes and its threads to lists of return addresses (initially empty)
     val raInitialValue = Option.when(epcCtx.thdDefinitionsToOperations.nonEmpty)
       (BinaryExpression("=", ra, BoundedMapping(List(selfInProcSet), BoundedMapping(List(thdInThreadSetSelf), emptyTuple))))
 
-    // O variable is a function that maps processes and its threads to sets of indices (initially empty).
-    val OInitialValue = Option.when(epcCtx.specWithMultiSends)
-      (BinaryExpression("=", O, BoundedMapping(List(selfInProcSet), BoundedMapping(List(thdInThreadSetSelf), emptySet))))
-
-    // F is a variable that contains failed processes and is used only when the FailStop modifier is configured.
-    val FInitialValue = Option.when(epcCtx.failStopConfigured)(BinaryExpression("=", F, emptySet))
-
-    // trim is variable that identifies the "Trusted Immortal" and is used when then WeakAccuracy modifier is configured.
-    val trimInitialValue = Option.when(epcCtx.weakAccuracyConfigured)(BinaryExpression("\\in", trim, ProcSet))
-
-    // Secondly, we will create state predicates for the initial state of the variables defined inside of locations.
+    // Lastly, we will create state predicates for the initial state of the variables defined inside of locations.
     val locationVariablePredicates = generateLocationVariablesInitStatePredicates()
 
-    // Thirdly, we will create state predicates for the initial states of the defined channels.
-    val channelPredicates = generateDefinedChannelsInitStatePredicate()
-
     // Generate the Init predicate
-    val initPredicate = OperatorDefinition(NonFixLHS(Init, Nil), ConjunctionList(
-        List(pcInitialValue) ++ raInitialValue ++ OInitialValue ++ FInitialValue ++ trimInitialValue ++ locationVariablePredicates ++ channelPredicates))
+    val initPredicate = OperatorDefinition(NonFixLHS(Init, Nil), ConjunctionList(Nil
+          ++ trimInitialValue ++ FInitialValue ++ aeInitialValue ++ OInitialValue ++ DInitialValue
+          ++ Option(pcInitialValue) ++ raInitialValue ++ locationVariablePredicates))
     // Add the Init predicate to the TLA builder.
     tlaStringBuilder.appendUnit(initPredicate)
     tlaStringBuilder.appendNewline()
@@ -262,12 +315,13 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   }
 
   /**
-   * Generates state predicates for the initial states of the defined channels. Each channel definition
-   * (such as "new c"), is translated into a TLA+ variable (with the same name as the channel)
-   * and holds the travelling messages, sent on that channel. Since channels will be implemented as Bags of
-   * triples << sender, receiver, payload >>, the top-level definition "new c" will lead to the predicate
-   * c = EmptyBag. However, since location networks can also be composed with a message aether (which is a
-   * multiset of travelling messages), the initial state of those channels can also be changed in that way.
+   * Generates state predicates for the initial states of the defined channels. Each channel declaration
+   * (e.g. "chan c1", "suspchan c2"), is translated as a TLA+ constant (with the same name as the channel).
+   * The message aether is represented as a TLA+ variable AE that maps each channel to a bag/multiset
+   * of the travelling messages, sent on that channel. Each travelling message in these bags is triple of
+   * the form << sender, receiver, payload >>. A simple top-level definition "chan c" will lead to the initial
+   * mapping "c = EmptyBag". However, since location networks can also be composed with a message aether (which
+   * is a multiset of travelling messages), the initial state of those channels can also be changed in that way.
    * To account for these changes, each message eather in the network, that contains messages for a channel,
    * will be added to the initial EmptyBag for that channel with "(+) SetToBag({...})".
    * Implementation details: We have two possibilities for the definition of multi-sets: QuantifiedMultiSets
@@ -277,8 +331,9 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
    * copies, which we don't want. For this reason, ExplicitMultiSets will be mapped to a SetToBag({...}) for
    * each message, which appears in them.
    */
-  private def generateDefinedChannelsInitStatePredicate(): List[Expression] = {
-    val channelPredicates = mutable.ListBuffer.empty[Expression]
+  private def generateMessageAetherInitStatePredicate(): Expression = {
+    // We calculate the initial bags for each channel
+    val initialChannelBags = mutable.ListBuffer.empty[(Identifier, Expression)]
     for (channel <- epcCtx.channels) {
       var channelInitialValue: Expression = emptyBag
       for (messageBag <- epcCtx.messageAether) {
@@ -296,9 +351,20 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           case _ => // do nothing
         }
       }
-      channelPredicates addOne BinaryExpression("=", channel, channelInitialValue)
+      initialChannelBags addOne (channel, channelInitialValue)
     }
-    channelPredicates.toList
+
+    // We create the predicate with the initial state of the AE variable
+    // This will have the form AE = [_chan \in ChanSet |-> CASE _chan = c1 -> ...
+    //                                                     []   _chan = c2 -> ...]
+    val aeInitialValue = BoundedMapping(List(chanInChanSet), CaseExpression(
+        // We create all case arms "_chan = c1 -> ...",
+        initialChannelBags.map((channel, initialBag) => CaseArm(BinaryExpression("=", chan, channel), initialBag)).toList,
+        // We map all channels, so there is no need for a default case
+        None
+      )
+    )
+    BinaryExpression("=", AE, aeInitialValue)
   }
 
   /**
@@ -508,7 +574,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     // Generate the specification Spec
     val specDefinition = OperatorDefinition(
       NonFixLHS(Spec, Nil),
-      if (!epcCtx.nextWFConfigured)
+      if !epcCtx.nextWFConfigured
         then BinaryExpression("/\\", Init, UnaryExpression("[]", WeakStuttering(Next, vars)))
         else BinaryExpression("/\\",
           BinaryExpression("/\\", Init, UnaryExpression("[]", WeakStuttering(Next, vars))),
@@ -607,6 +673,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     case LeafOperation(id, label, command) => List(operation)
     case IfOperation(id, label, condition, thenRegion, elseRegion) =>
       List(operation) ++ thenRegion.flatMap(flattenOperation) ++ elseRegion.flatMap(flattenOperation)
+    case ChoiceOperation(id, label, choices) => List(operation)
   }
 
   /**
@@ -647,7 +714,8 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
                                  flattenedRegion: Region,
                                  edges: List[DiEdge],
                                  locationVariables: List[Identifier],
-                                 allTLAVariables: List[Identifier]): List[OperatorDefinition] = {
+                                 allTLAVariables: List[Identifier],
+                                 secondaryActionID: Option[Int] = None): List[OperatorDefinition] = {
     val currentLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, None)
     val pcEnablingCondition = PCEnablingCondition(currentLabel)
     operation match {
@@ -684,25 +752,78 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
               ))
             )
           case Receive(channel, location, variable) =>
+            // Receive actions can be part of a choice of multiple alternatives.
+            // For each alternative, we are creating TLA+ actions as if the other alternatives did not exist.
+            // However, these actions (TLA+ operators) need to have unique names ==> We need secondary action IDs.
+            // If such an ID is provided (currently only in the case of choices of multiple receives),
+            // we append the secondary ID to the generated label, before the rule suffix.
+            // E.g. rcv: c@1?(y) + c@2?(y) will be generated into two TLA+ actions: rcv_1Rcv and rcv_2Rcv (if c is a "normal" channel)
+            val secondarySuffix = secondaryActionID.map("_" + _.toString).getOrElse("")
+            val rcvActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, Some(secondarySuffix + "Rcv"))
             List(
-              OperatorDefinition(NonFixLHS(Identifier(currentLabel), List(self, thd)), ConjunctionList(
+              OperatorDefinition(NonFixLHS(Identifier(rcvActionLabel), List(self, thd)), ConjunctionList(
                 List(pcEnablingCondition)
-                  ++ generateReceiveEffect(channel, location, variable, locationVariables)
+                  ++ generateReceiveEffect(channel, location, variable, locationVariables, "Rcv")
                   ++ pcUpdateUnlessOnThreadExit
                   ++ pcUpdateOnThreadExit
                   ++ raUpdateOnThreadExit
-                  ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(variable, channel, pc, raOnThreadExit))))
+                  ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(AE, pc, raOnThreadExit, variable))))
               ))
             )
-            ++ Option.when(epcCtx.weakAccuracyConfigured) ({
+            ++ Option.when(epcCtx.suspiciousChannels.nonEmpty) ({
+              val rcvSActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, Some(secondarySuffix + "RcvS"))
+              OperatorDefinition(NonFixLHS(Identifier(rcvSActionLabel), List(self, thd)), ConjunctionList(
+                List(pcEnablingCondition)
+                  ++ generateReceiveEffect(channel, location, variable, locationVariables, "RcvS")
+                  ++ pcUpdateUnlessOnThreadExit
+                  ++ pcUpdateOnThreadExit
+                  ++ raUpdateOnThreadExit
+                  ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(AE, D, pc, raOnThreadExit, variable))))
+              ))
+            })
+            ++ Option.when(epcCtx.suspiciousChannels.nonEmpty) ({
+              val suspectActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, Some(secondarySuffix + "Susp"))
+              OperatorDefinition(NonFixLHS(Identifier(suspectActionLabel), List(self, thd)), ConjunctionList(
+                List(pcEnablingCondition)
+                  ++ generateSuspectEffect(channel, location, locationVariables)
+                  ++ pcUpdateUnlessOnThreadExit
+                  ++ pcUpdateOnThreadExit
+                  ++ raUpdateOnThreadExit
+                  ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(D, pc, raOnThreadExit))))
+              ))
+            })
+          case IndexedSumChoice(enumerator, Receive(channel, location, variable)) =>
+            val rcvActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, Some("Rcv"))
+            List(
+              OperatorDefinition(NonFixLHS(Identifier(rcvActionLabel), List(self, thd)), ConjunctionList(
+                List(pcEnablingCondition)
+                  ++ generateReceiveEffect(channel, location, variable, locationVariables, "Rcv", Some(enumerator))
+                  ++ pcUpdateUnlessOnThreadExit
+                  ++ pcUpdateOnThreadExit
+                  ++ raUpdateOnThreadExit
+                  ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(AE, pc, raOnThreadExit, variable))))
+              ))
+            )
+            ++ Option.when(epcCtx.suspiciousChannels.nonEmpty) ({
+              val rcvSActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, Some("RcvS"))
+              OperatorDefinition(NonFixLHS(Identifier(rcvSActionLabel), List(self, thd)), ConjunctionList(
+                List(pcEnablingCondition)
+                  ++ generateReceiveEffect(channel, location, variable, locationVariables, "RcvS", Some(enumerator))
+                  ++ pcUpdateUnlessOnThreadExit
+                  ++ pcUpdateOnThreadExit
+                  ++ raUpdateOnThreadExit
+                  ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(AE, D, pc, raOnThreadExit, variable))))
+              ))
+            })
+            ++ Option.when(epcCtx.suspiciousChannels.nonEmpty) ({
               val suspectActionLabel = getOperationLabel(locEnumOption, thdEnumOption, thdIdentifierOption, operation, Some("Susp"))
               OperatorDefinition(NonFixLHS(Identifier(suspectActionLabel), List(self, thd)), ConjunctionList(
                 List(pcEnablingCondition)
-                  ++ generateSuspectEffect(location, locationVariables)
+                  ++ generateSuspectEffect(channel, location, locationVariables, Some(enumerator))
                   ++ pcUpdateUnlessOnThreadExit
                   ++ pcUpdateOnThreadExit
                   ++ raUpdateOnThreadExit
-                  ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(pc, raOnThreadExit))))
+                  ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(D, pc, raOnThreadExit))))
               ))
             })
           case Send(ExplicitMultiSet(Nil)) =>
@@ -717,11 +838,11 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
                   messages match {
                     case ExplicitMultiSet(Nil) => allTLAVariables
                     case ExplicitMultiSet(message :: Nil) =>
-                      getUnchangedVars(allTLAVariables, List(message.channel, pc, raOnThreadExit))
+                      getUnchangedVars(allTLAVariables, List(AE, pc, raOnThreadExit))
                     case ExplicitMultiSet(messages) =>
-                      getUnchangedVars(allTLAVariables, List(messages.head.channel, pc, raOnThreadExit, O))
+                      getUnchangedVars(allTLAVariables, List(AE, O, pc, raOnThreadExit))
                     case QuantifiedMultiSet(enumerator, message) =>
-                      getUnchangedVars(allTLAVariables, List(message.channel, pc, raOnThreadExit, O))
+                      getUnchangedVars(allTLAVariables, List(AE, O, pc, raOnThreadExit))
                   }
                 ))
               ))
@@ -743,9 +864,10 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
                   ++ Option.when(successorLabel == DONE) (UnchangedExpr(getUnchangedVars(allTLAVariables, List(pc))))
               ))
             )
-          case ConditionalThread(_, _, _) =>
-            // This is only to remove the compiler warning, conditional threads are turned into IfOperations in the analysis phase.
-            Nil
+          // This is only to remove the compiler warning, conditional threads are turned into IfOperations in the analysis phase!
+          case ConditionalThread(_, _, _) => Nil
+          // This is only to remove the compiler warning, choices are turned into ChoiceOperations in the analysis phase!
+          case Choice(_) => Nil
         }
 
       case IfOperation(id, label, condition, thenRegion, elseRegion) =>
@@ -787,6 +909,13 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
               ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(pc, elseRAOnThreadExit))))
           ))
         )
+
+      case ChoiceOperation(id, label, choices) =>
+        // Here we call the translateOperation() method recursively for all receive alternatives.
+        // Additionally, we pass the index of the "receive alterative" among all alternatives
+        // as a "secondary operation ID", so that the corresponding TLA+ operator can be generated with a unique name.
+        choices.zipWithIndex.flatMap((choiceOperation, choiceIndex) => translateOperation(locEnumOption, thdEnumOption, thdIdentifierOption,
+          choiceOperation, flattenedRegion, edges, locationVariables, allTLAVariables, Some(choiceIndex + 1)))
     }
   }
 
@@ -797,11 +926,14 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           case Declaration(_) => "D"
           case Assignment(_, _) => "A"
           case Receive(_, _, _) => "R"
+          case Choice(_) => "R" // this should not happen, since choices are turned into ChoiceOperations!
+          case IndexedSumChoice(_, _) => "R"
           case Send(_) => "S"
           case ThreadInstantiation(_) => "I"
           case ConditionalThread(_, _, _) => "C" // this should not happen, since conditional threads are turned into IfOperations!
         }
       case IfOperation(id, label, condition, thenRegion, elseRegion) => "C" // "C" for conditional
+      case ChoiceOperation(id, label, choices) => "R" // "R" for receive action
     }
 
   private def getOperationLabel(locEnumOption: Option[Enumerator],
@@ -966,46 +1098,104 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     List(variableIsNotUndefined, variableIsSetToExpressionInNextState)
   }
 
-  private def generateReceiveEffect(channel: Expression, locationExpr: Expression, variable: Identifier, locationVariables: List[Identifier]): List[Expression] = {
-    val sourceExpr = rewriteAccessToLocationVariables(locationExpr, locationVariables)
+  private def generateReceiveEffect(channel: Expression,
+                                    location: Expression,
+                                    variable: Identifier,
+                                    locationVariables: List[Identifier],
+                                    rcvOrRcvS: "Rcv" | "RcvS",
+                                    enumeratorOption: Option[Enumerator] = None): List[Expression] = {
+    val channelExpr = rewriteAccessToLocationVariables(channel, locationVariables)
+    val sourceExpr = rewriteAccessToLocationVariables(location, locationVariables)
     val variableExpr = rewriteAccessToLocationVariables(variable, locationVariables)
+    // The channel should be part of "ChanSet \ SuspChanSet" or "SuspChanSet"
+    val channelSet = rcvOrRcvS match {
+      case "Rcv" if epcCtx.suspiciousChannels.isEmpty => ChanSet
+      case "Rcv" => BinaryExpression("\\", ChanSet, SuspChanSet)
+      case "RcvS" => SuspChanSet
+    }
+    // We require that the channel is a "normal", non-suspicious channel, i.e. c \in Chan \ SuspChanSet
+    val channelIsInChanSet = BinaryExpression("\\in", channelExpr, channelSet)
     // We require that the location expression can be evaluation to a valid location (is element of ProcSet).
     val sourceExprIsInProcSet = BinaryExpression("\\in", sourceExpr, ProcSet)
     // We require that the variable in the "receive" action is not Undefined at the location. E.g. x[self] # Undefined.
     val variableIsNotUndefined = BinaryExpression("#", variableExpr, Undefined)
     // Another precondition is that there is a message in the given channel
-    // \E msg \in DOMAIN (channel)
+    // \E msg \in DOMAIN AE[c]
     val messageBinder = getUniqueIdentifier(Identifier("msg"))
-    val messageHandlingEffect = BoundedQuantifiedExpression(
-      "\\E", List(QuantifierBound(messageBinder, UnaryExpression("DOMAIN", channel))),
-      ConjunctionList(
-        List(
-          // msg[1] = ... (location-expression)
-          BinaryExpression("=", FunctionApplication(messageBinder, List(Literal(1))), rewriteAccessToLocationVariables(locationExpr, locationVariables)),
-          // msg[2] = self
-          BinaryExpression("=", FunctionApplication(messageBinder, List(Literal(2))), self),
-          // The first effect of the action is that the variable at the location is now set to the payload of the message.
-          // E.g. x' = [x EXCEPT ![self] = msg[3] ]
-          BinaryExpression("=", PrimedExpression(variable), ExceptExpression(variable, List(
-            ExceptClause(SelectorPath(List(IndexSelector(List(self)))), FunctionApplication(messageBinder, List(Literal(3))))
-          ))),
-          // The second effect of the action is that the message is removed from the channel.
-          // E.g. c' = c (-) SetToBag( {msg} )
-          BinaryExpression("=", PrimedExpression(channel), BinaryExpression("(-)", channel, IdentifierApplication(SetToBag, List(ExplicitSet(List(messageBinder))))))
-        )
+    // Nested preconditions under the existential quantifier
+    // Precondition that requires that the message source location is the one specified in the message source expression
+    // msg[1] = ... (location-expression)
+    val sourcePrecondition = BinaryExpression("=", FunctionApplication(messageBinder, List(Literal(1))), sourceExpr)
+    // Precondition that requires that the message target location in the current location (self)
+    // msg[2] = self
+    val targetPrecondition = BinaryExpression("=", FunctionApplication(messageBinder, List(Literal(2))), self)
+    // For TLA+ actions corresponding to rule RcvS we also need to update the D component of the executing location
+    val failureDetectorUpdate = Option.when(rcvOrRcvS == "RcvS")(
+      // D' = [D EXCEPT ![self][channelExpr][sourceExpr] = TRUE]
+      BinaryExpression("=", PrimedExpression(D),
+        ExceptExpression(D, List(ExceptClause(SelectorPath(List(
+          IndexSelector(List(self)), IndexSelector(List(channelExpr)), IndexSelector(List(sourceExpr)))),
+          Literal(true))))
       )
     )
-    List(sourceExprIsInProcSet, variableIsNotUndefined, messageHandlingEffect)
+    // Update of the variable at the location to the payload of the message.
+    // E.g. x' = [x EXCEPT ![self] = msg[3] ]
+    val variableUpdate = BinaryExpression("=", PrimedExpression(variable), ExceptExpression(variable, List(
+      ExceptClause(SelectorPath(List(IndexSelector(List(self)))), FunctionApplication(messageBinder, List(Literal(3))))
+    )))
+    // Update of the message aether so that the message is removed from the channel.
+    // E.g. AE' = [AE EXCEPT ![c] = AE[c] (-) SetToBag( {msg} ) ]
+    val messageAetherUpdate = BinaryExpression("=", PrimedExpression(AE),
+      ExceptExpression(AE, List(ExceptClause(SelectorPath(List(IndexSelector(List(channelExpr)))),
+          // AE[c] (-) SetToBag( {msg} )
+          BinaryExpression("(-)", FunctionApplication(AE, List(channelExpr)), IdentifierApplication(SetToBag, List(ExplicitSet(List(messageBinder)))))
+      )))
+    )
+    val messageHandlingEffect = BoundedQuantifiedExpression("\\E", List(
+      QuantifierBound(messageBinder, UnaryExpression("DOMAIN", FunctionApplication(AE, List(channelExpr))))),
+      ConjunctionList(
+        List(sourcePrecondition, targetPrecondition)
+        ++ failureDetectorUpdate
+        ++ List(variableUpdate, messageAetherUpdate))
+    )
+    // We add all conjuncts together
+    val receiveConjuncts = List(channelIsInChanSet, sourceExprIsInProcSet, variableIsNotUndefined, messageHandlingEffect)
+    // If an enumerator is provided (this the case when the "receive" action is given as an indexed sum),
+    // we map the enumerator to a binder and an index set, and we wrap all generated equations in it.
+    // E.g. (j \ in 1..N) c@j?(x) --> /\ \E j \in 1..N : /\ c \in ChanSet /\ ...
+    enumeratorOption.map(enumerator => {
+      val (indexSetBinder, indexSet) = enumeratorToBoundVariableAndIndexSetWithRewrite(enumerator, locationVariables)
+      List(BoundedQuantifiedExpression("\\E", List(QuantifierBound(indexSetBinder, indexSet)), ConjunctionList(receiveConjuncts)))
+    }).getOrElse(receiveConjuncts)
   }
 
-  private def generateSuspectEffect(location: Expression, locationVariables: List[Identifier]): List[Expression] = {
+  private def generateSuspectEffect(channel: Expression,
+                                    location: Expression,
+                                    locationVariables: List[Identifier],
+                                    enumeratorOption: Option[Enumerator] = None): List[Expression] = {
+    val channelExpr = rewriteAccessToLocationVariables(channel, locationVariables)
     val sourceExpr = rewriteAccessToLocationVariables(location, locationVariables)
+    // We require that the channel expression can be evaluated to a suspicious channel
+    // In symbols: c \in SuspChanSet
+    val channelIsInSuspChanSet = BinaryExpression("\\in", channelExpr, SuspChanSet)
     // We require that the source location in the "receive" action is a process.
     // E.g. <location-expression> \in ProcSet
     val sourceIsInProcSet = BinaryExpression("\\in", sourceExpr, ProcSet)
-    // And that it is not the trusted immortal
-    val sourceIsNotTrustedImmortal = BinaryExpression("#", sourceExpr, trim)
-    List(sourceIsInProcSet, sourceIsNotTrustedImmortal)
+    // We update the D component of the executing location
+    // D' = [D EXCEPT ![self][channelExpr][sourceExpr] = FALSE]
+    val DComponentUpdate = BinaryExpression("=", PrimedExpression(D),
+      ExceptExpression(D, List(ExceptClause(SelectorPath(List(
+        IndexSelector(List(self)), IndexSelector(List(channelExpr)), IndexSelector(List(sourceExpr)))),
+        Literal(false))))
+    )
+    val suspectConjuncts = List(channelIsInSuspChanSet, sourceIsInProcSet, DComponentUpdate)
+    // If an enumerator is provided (this the case when the "receive" action is given as an indexed sum),
+    // we map the enumerator to a binder and an index set, and we wrap all generated equations in it.
+    // E.g. (j \ in 1..N) c@j?(x) --> /\ \E j \in 1..N : /\ c \in SuspChanSet /\ ...
+    enumeratorOption.map(enumerator => {
+      val (indexSetBinder, indexSet) = enumeratorToBoundVariableAndIndexSetWithRewrite(enumerator, locationVariables)
+      List(BoundedQuantifiedExpression("\\E", List(QuantifierBound(indexSetBinder, indexSet)), ConjunctionList(suspectConjuncts)))
+    }).getOrElse(suspectConjuncts)
   }
 
   private def generateSendEffect(messages: MultiSet[OutgoingMessage],
@@ -1030,7 +1220,6 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           ++ pcUpdateOnThreadExit
           ++ raUpdateOnThreadExit
       case ExplicitMultiSet(multipleMessages) =>
-        // TODO We only allow the sending of multiple messages in a single comman on the same channel!
         // Sending multiple messages means that we also need to remember what was sent so far.
         // The implementation of the Send command is based on existential quantification over the set of messages
         // that are still not send. Since we cannot simply send a multiset of all messages at once (since the values
@@ -1043,8 +1232,8 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         // we create the set 1..2 and maintain O[self][thd], which should initially be empty,
         // then \E i \in 1..2 \ O[self][thd]: ... will give us the index of the next message to send.
         // The changes will include a change in the channel based on a case distinction for the different indices:
-        // - c' = CASE i = 1 -> c (+) SetToBag({ << self, 2, "Hello" >> })
-        //        []   i = 2 -> c (+) SetToBag({ << self, 3, "Hello" >> })
+        // - AE' = CASE i = 1 -> [AE EXCEPT ![c] = AE[c] (+) SetToBag({ << self, 2, "Hello" >> })]
+        //         []   i = 2 -> [AE EXCEPT ![c] = AE[c] (+) SetToBag({ << self, 2, "Hello" >> })]
         // an update of the O variable to include the index i, which is being send with the current action.
         // Importantly, once we have sent all message, we need to reset O to the empty set, in order to "clean it up".
         // - O' = [O EXCEPT ![self][thd] = IF @ \cup { i } # 1..2
@@ -1076,41 +1265,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         // E.g. {{ (j = 1) c@j!<<j>> }}
         // Still, we need to the bounded variable, so we turn the domain into a set. This example will be translated into:
         // SetToBag({ << self, j, j >> })
-        val (boundVariable, indexSet) = enumerator match {
-          // Translate the bounded enumerators into pairs of a binder and a set.
-          // {{ (j = 1) c@j!<<j>> }}       --> (j, {1})   --> \E j \in {1}
-          // {{ (j \in 1..N) c@j!<<j>> }}  --> (j, 1..N)  --> \E j \in 1..N
-          case BoundedEnumerator(name, "=", domain) =>
-            val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
-            (name, ExplicitSet(List(rewrittenDomain)))
-          case BoundedEnumerator(name, "\\in", domain) =>
-            val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
-            (name, rewrittenDomain)
-          // Turning bounded enumerators with filters into index sets introduces binders with the same name:
-          // {{ (j = 1) c@j!<<j>> : j # 1 }}           --> \E j \in { j \in {1}: j # 1 }: ...
-          // {{ (j \in 1..N) c@j!<<j>> : j # self }}   --> \E j \in { j \in 1..N: j # self }: ...
-          // To avoid this, we do a renaming of the inner binder with a unique name, constructed from the bound variable.
-          case BoundedEnumeratorWithFilter(name, "=", domain, filter) =>
-            val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
-            val rewrittenFilter = rewriteAccessToLocationVariables(filter, locationVariables)
-            val setComprehension = BoundedSetComprehension(name, ExplicitSet(List(rewrittenDomain)), rewrittenFilter)
-            // We "throw away" the identifier with the same name as given in the EPC code (e.g. simply j).
-            if (!knownIdentifiers.contains(name)) getUniqueIdentifier(name)
-            // We create a new identifier for the inner set comprehension (e.g. j1).
-            val innerBinder = getUniqueIdentifier(name)
-            val renamedSetComprehension = renameBV(name, innerBinder, setComprehension, depth = 1)
-            (name, renamedSetComprehension)
-          case BoundedEnumeratorWithFilter(name, "\\in", domain, filter) =>
-            val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
-            val rewrittenFilter = rewriteAccessToLocationVariables(filter, locationVariables)
-            val setComprehension = BoundedSetComprehension(name, rewrittenDomain, rewrittenFilter)
-            // We "throw away" the identifier with the same name as given in the EPC code (e.g. simply j).
-            if (!knownIdentifiers.contains(name)) getUniqueIdentifier(name)
-            // We create a new identifier for the inner set comprehension (e.g. j1).
-            val innerBinder = getUniqueIdentifier(name)
-            val renamedSetComprehension = renameBV(name, innerBinder, setComprehension, depth = 1)
-            (name, renamedSetComprehension)
-        }
+        val (boundVariable, indexSet) = enumeratorToBoundVariableAndIndexSetWithRewrite(enumerator, locationVariables)
         val alreadySend = FunctionApplication(FunctionApplication(O, List(self)), List(thd))
         val remainingIndices = BinaryExpression("\\", indexSet, alreadySend)
         val raUpdateOnThreadExitForMultiSend = Option.when(isThreadExit)(generateRAUpdateForMultiSend(boundVariable, indexSet))
@@ -1126,27 +1281,90 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     }
   }
 
+  /**
+   * Translates bounded enumerators into pairs of a bound variable and a set.
+   * During the translation all accesses to location variables in the domain
+   * of the enumerator are rewritten so that they are applied to self (e.g. x --> x[self]).
+   * @param enumerator The input enumerator.
+   * @param locationVariables The identifiers that are location variables and should be rewritten.
+   * @return
+   */
+  private def enumeratorToBoundVariableAndIndexSetWithRewrite(enumerator: Enumerator, locationVariables: List[Identifier]): (Identifier, Expression) = {
+    enumerator match {
+      // Translate the bounded enumerators into pairs of a binder and a set.
+      // {{ (j = 1) c@j!<<j>> }}       --> (j, {1})   --> \E j \in {1}
+      // {{ (j \in 1..N) c@j!<<j>> }}  --> (j, 1..N)  --> \E j \in 1..N
+      case BoundedEnumerator(name, "=", domain) =>
+        val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
+        (name, ExplicitSet(List(rewrittenDomain)))
+      case BoundedEnumerator(name, "\\in", domain) =>
+        val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
+        (name, rewrittenDomain)
+      // Turning bounded enumerators with filters into index sets introduces binders with the same name:
+      // {{ (j = 1) c@j!<<j>> : j # 1 }}           --> \E j \in { j \in {1}: j # 1 }: ...
+      // {{ (j \in 1..N) c@j!<<j>> : j # self }}   --> \E j \in { j \in 1..N: j # self }: ...
+      // To avoid this, we do a renaming of the inner binder with a unique name, constructed from the bound variable.
+      case BoundedEnumeratorWithFilter(name, "=", domain, filter) =>
+        val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
+        val rewrittenFilter = rewriteAccessToLocationVariables(filter, locationVariables)
+        val setComprehension = BoundedSetComprehension(name, ExplicitSet(List(rewrittenDomain)), rewrittenFilter)
+        // We "throw away" the identifier with the same name as given in the EPC code (e.g. simply j).
+        if (!knownIdentifiers.contains(name)) getUniqueIdentifier(name)
+        // We create a new identifier for the inner set comprehension (e.g. j1).
+        val innerBinder = getUniqueIdentifier(name)
+        val renamedSetComprehension = renameBV(name, innerBinder, setComprehension, depth = 1)
+        (name, renamedSetComprehension)
+      case BoundedEnumeratorWithFilter(name, "\\in", domain, filter) =>
+        val rewrittenDomain = rewriteAccessToLocationVariables(domain, locationVariables)
+        val rewrittenFilter = rewriteAccessToLocationVariables(filter, locationVariables)
+        val setComprehension = BoundedSetComprehension(name, rewrittenDomain, rewrittenFilter)
+        // We "throw away" the identifier with the same name as given in the EPC code (e.g. simply j).
+        if (!knownIdentifiers.contains(name)) getUniqueIdentifier(name)
+        // We create a new identifier for the inner set comprehension (e.g. j1).
+        val innerBinder = getUniqueIdentifier(name)
+        val renamedSetComprehension = renameBV(name, innerBinder, setComprehension, depth = 1)
+        (name, renamedSetComprehension)
+    }
+  }
+
   private def generateChannelUpdateForSingleSend(singleMsg: OutgoingMessage, locationVariables: List[Identifier]) = {
-    BinaryExpression("=", PrimedExpression(singleMsg.channel),
-      BinaryExpression("(+)", singleMsg.channel,
-        IdentifierApplication(SetToBag, List(ExplicitSet(List(
-          // Here, we create a triple of the form << self, target, value >>
-          Tuple(List(self, rewriteAccessToLocationVariables(singleMsg.target, locationVariables), rewriteAccessToLocationVariables(singleMsg.value, locationVariables))))))
+    // AE' = [AE EXCEPT ![c] = AE[c] (+) SetToBag({<<self,2,x[self]>>})]
+    BinaryExpression("=", PrimedExpression(AE),
+      ExceptExpression(AE, List(
+        ExceptClause(SelectorPath(List(IndexSelector(List(singleMsg.channel)))),
+          // AE[c] (+) SetToBag({ << self, 2, x[self] >> })
+          BinaryExpression("(+)", FunctionApplication(AE, List(singleMsg.channel)),
+            IdentifierApplication(SetToBag, List(ExplicitSet(List(
+              // Here, we create a triple of the form << self, target, value >>
+              Tuple(List(self, rewriteAccessToLocationVariables(singleMsg.target, locationVariables), rewriteAccessToLocationVariables(singleMsg.value, locationVariables))))))
+            )
+          )
         )
-      )
+      ))
     )
   }
 
   private def generateChannelUpdateForMultiSend(indexBinder: Identifier, multipleMessages: List[OutgoingMessage], locationVariables: List[Identifier]) = {
-    BinaryExpression("=", PrimedExpression(multipleMessages.head.channel),
+    // - AE' = CASE i = 1 -> [AE EXCEPT ![c] = AE[c] (+) SetToBag({ << self, 2, "Hello" >> })]
+    //         []   i = 2 -> [AE EXCEPT ![c] = AE[c] (+) SetToBag({ << self, 2, "Hello" >> })]
+    BinaryExpression("=", PrimedExpression(AE),
       CaseExpression(
         for ((message, idx) <- multipleMessages.zipWithIndex) yield {
           CaseArm(
+            // CASE i = 1 ->
             BinaryExpression("=", indexBinder, Literal(idx + 1)),
-            BinaryExpression("(+)", multipleMessages.head.channel,
-              IdentifierApplication(SetToBag, List(ExplicitSet(List(
-                Tuple(List(self, rewriteAccessToLocationVariables(message.target, locationVariables), rewriteAccessToLocationVariables(message.value, locationVariables)))))))
-            )
+            // [AE EXCEPT ![c] = AE[c] (+) SetToBag({ << self, 2, "Hello" >> })]
+            ExceptExpression(AE, List(
+              ExceptClause(SelectorPath(List(IndexSelector(List(message.channel)))),
+                // AE[c] (+) SetToBag({ << self, 2, x[self] >> })
+                BinaryExpression("(+)", FunctionApplication(AE, List(message.channel)),
+                  IdentifierApplication(SetToBag, List(ExplicitSet(List(
+                    // Here, we create a triple of the form << self, target, value >>
+                    Tuple(List(self, rewriteAccessToLocationVariables(message.target, locationVariables), rewriteAccessToLocationVariables(message.value, locationVariables))))))
+                  )
+                )
+              )
+            ))
           )
         },
         None
@@ -1264,7 +1482,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
 
   /**
    * General rewrite, which allows to rewrite different AST nodes of a TLA+ expression with an input "rewrite function".
-   * The method iterates recusively over an AST and rewrites each node using the rewrite funciton.
+   * The method iterates recursively over an AST and rewrites each node using the rewrite funciton.
    */
   private def rewrite(expression: Expression, rewriteFn: Expression => Expression): Expression = {
     expression match {

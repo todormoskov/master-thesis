@@ -14,6 +14,7 @@ sealed trait Operation {
 type Region = List[Operation]
 case class LeafOperation(id: Int, label: Option[Identifier], command: Command) extends Operation
 case class IfOperation(id: Int, label: Option[Identifier], condition: Expression, thenRegion: Region, elseRegion: Region) extends Operation
+case class ChoiceOperation(id: Int, label: Option[Identifier], choices: Region) extends Operation
 case class DiEdge(start: Int, end: Int, label: Option[String])
 type CFG = (List[Operation], List[DiEdge])
 
@@ -23,6 +24,7 @@ type CFG = (List[Operation], List[DiEdge])
 case class EPCSpecContext(
   visibleTLAOperators: mutable.LinkedHashSet[String],
   channels: mutable.LinkedHashSet[Identifier],
+  suspiciousChannels: mutable.LinkedHashSet[Identifier],
   locationVariables: mutable.LinkedHashMap[Enumerator, mutable.ListBuffer[Mapping]],
   locationThreads: mutable.LinkedHashMap[Enumerator, mutable.ListBuffer[Enumerator]],
   locThdEnumsToOperations: mutable.LinkedHashMap[(Enumerator, Enumerator), CFG],
@@ -64,6 +66,7 @@ object Analyzer {
       }
 
       val channels = mutable.LinkedHashSet.empty[Identifier]
+      val suspiciousChannels = mutable.LinkedHashSet.empty[Identifier]
       val locationVariables = mutable.LinkedHashMap.empty[Enumerator, mutable.ListBuffer[Mapping]]
       val locationThreads = mutable.LinkedHashMap.empty[Enumerator, mutable.ListBuffer[Enumerator]]
       val locThdEnumsToThread = mutable.LinkedHashMap.empty[(Enumerator, Enumerator), Thread]
@@ -88,6 +91,10 @@ object Analyzer {
         case ChannelDefinition(identifier) =>
           // Add the channel to the channels set
           channels += identifier
+        case SuspiciousChannelDefinition(identifiers) =>
+          // Add the suspicious channels to both sets ChanSet and SuspChanSet
+          channels ++= identifiers
+          suspiciousChannels ++= identifiers
         case ThreadDefinition(identifier, freeVariables, body) =>
           // Associate the thread identifier with its free variables for easier access later
           threadDefFreeVars addOne identifier -> freeVariables
@@ -126,6 +133,8 @@ object Analyzer {
             case Declaration(identifier) => addBinding[Enumerator, Mapping](locationVariables, locEnum, Mapping(identifier, Identifier("Undefined")))
             case Assignment(identifier, expression) =>
             case Receive(channel, location, variable) =>
+            case Choice(choices) =>
+            case IndexedSumChoice(enumerator, receive) =>
             case Send(messages) =>
           }
           case ConditionalThread(cond, thenThread, elseThread) =>
@@ -164,6 +173,7 @@ object Analyzer {
             case _ => false
           }
           case IfOperation(_, _, _, thenRegion, elseRegion) => (thenRegion ++ elseRegion).exists(isSendOfMultipleMessages)
+          case ChoiceOperation(_, _, _) => false
         }
         region.exists(isSendOfMultipleMessages)
       }
@@ -174,6 +184,7 @@ object Analyzer {
       Right(EPCSpecContext(
         visibleTLAOperators,
         channels,
+        suspiciousChannels,
         locationVariables,
         locationThreads,
         locThdEnumsToOperations,
@@ -233,6 +244,11 @@ class ControlFlowAnalyzer {
           toOperations(thenThread),
           toOperations(elseThread)
         )
+      case threadUnit@ThreadUnit(label, Choice(choices)) =>
+        // When transforming a choice of multiple receive actions,
+        // all alternatives receive the same action ID and label.
+        val actionID = getAndIncrementActionID()
+        ChoiceOperation(actionID, label, choices.map(receive => LeafOperation(actionID, label, receive)))
       case threadUnit@ThreadUnit(label, command) => LeafOperation(getAndIncrementActionID(), label, command)
     }
 
@@ -285,6 +301,10 @@ class ControlFlowAnalyzer {
           // Secondly, we recursively compute the edges in the "then" and "else" regions.
           ++ computeEdges(thenOperations, regionAfterOp ++ successorRegion)
           ++ computeEdges(elseOperations, regionAfterOp ++ successorRegion)
+      case op@ChoiceOperation(id, _, _) =>
+        // For Choices, we simply create an edge between the whole choice and its successor in the current region
+        // This is enough, because all alternative receive actions share the same ID => This connects them automatically.
+        List( DiEdge(id, getSuccessorIDInRegion(op, region ++ successorRegion), None) )
       case op@LeafOperation(id, _, ThreadInstantiation(threadName)) =>
         // Thread Instantiations know their successors in their current region
         // (where to "return to" when the instantiated thread completes)

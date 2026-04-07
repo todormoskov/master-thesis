@@ -317,7 +317,7 @@ case class AtSign() extends Expression
  */
 case class EPCSpec(identifier: Identifier, modifiers: List[Identifier], specUnits: List[EPCSpecUnit]) extends ModuleUnit
 /**
- * EPCSpecUnit := ChannelDefinition | ThreadDefinition | Network
+ * EPCSpecUnit := ChannelDefinition | SuspiciousChannelDefinition | ThreadDefinition | Network
  */
 sealed trait EPCSpecUnit extends AST
 /**
@@ -342,6 +342,12 @@ case class BoundedEnumeratorWithFilter(name: Identifier, equalOrIn: String, doma
  * E.g. new c
  */
 case class ChannelDefinition(identifier: Identifier) extends EPCSpecUnit
+/**
+ * SuspiciousChannelDefinition := 'suspchan' CommaList(Identifier)
+ *
+ * E.g. suspchan c1, c2
+ */
+case class SuspiciousChannelDefinition(identifiers: List[Identifier]) extends EPCSpecUnit
 /**
  * TravellingMessage := Identifier '_' '{' Literal '->' Literal '}' '<<' Expression '>>'
  *
@@ -390,6 +396,18 @@ case class Assignment(identifier: Identifier, expression: Expression) extends Ac
  * E.g. c@2?(x)
  */
 case class Receive(channel: Expression, location: Expression, variable: Identifier) extends Action
+/**
+ * Choice := Receive ['+' Receive]*
+ *
+ * E.g. c@1?(x) + c@2?(x)
+ */
+case class Choice(choices: List[Receive]) extends Action
+/**
+ * IndexedSumChoice := Enumerator Receive
+ *
+ * E.g. (j \in 1..N) c@j?(x)
+ */
+case class IndexedSumChoice(enumerator: Enumerator, receive: Receive) extends Action
 /**
  * Send := MultiSet(OutgoingMessage)
  *
@@ -531,7 +549,8 @@ class Parser(lexer: Tokenizer) {
   }
 
   /**
-   * Parses a comma-separated list of objects (identifiers, expressions, ...).
+   * Parses a separated list of objects (identifiers, expressions, ...).
+   * The separator can be any token. E.g. comma, plus, ...
    *
    * @param consumer Consumer function for the separate objects.
    *                 Contains the logic for the parsing of a single object.
@@ -539,13 +558,13 @@ class Parser(lexer: Tokenizer) {
    * @tparam T Type argument for the type of the consumed object. (E.g. Token)
    * @return A list with consumed objects.
    */
-  private def parseCommaList[T](consumer: () => Either[String, T]): Either[String, List[T]] =
+  private def parseSeparatedList[T](consumer: () => Either[String, T], separator: TokenKind): Either[String, List[T]] =
     for {
       // Consume the object
       firstObject <- consumer()
       // To get the whole result, we first declare a recursive procedure
-      // which will check on each call if there is a comma
-      // if yes, it will consume the comma and the object; and then continue recursively
+      // which will check on each call if there is a separator (for example a comma)
+      // if yes, it will consume the separator and the object; and then continue recursively
       // if no, it will return the accumulated result
       result <- {
         // Initial accumulator contains the first object
@@ -553,15 +572,16 @@ class Parser(lexer: Tokenizer) {
 
         // Recursive procedure for the next objects
         def loop(accumulator: ListBuffer[T]): Either[String, List[T]] = {
-          // Here we check if there is a comma. If yes, we consume it
+          // Here we check if there is a separator. If yes, we consume it
           // and call the consumer function to consume the next object,
           // which we append to the accumulator list.
           // After that, we return the result of the recursive call.
-          if check(TokenKind.COMMA) then for {
-            _ <- consume(TokenKind.COMMA)
+          if check(separator) then for {
+            _ <- consume(separator)
             nextObject <- consumer()
             intermediateResult <- {
-              accumulator += nextObject; loop(accumulator)
+              accumulator += nextObject;
+              loop(accumulator)
             }
           } yield intermediateResult
           // If we cannot find any further commas, we return the accumulator as an immutable list.
@@ -571,6 +591,18 @@ class Parser(lexer: Tokenizer) {
         loop(initialAcc)
       }
     } yield result
+
+  /**
+   * Parses a comma-separated list of objects (identifiers, expressions, ...).
+   *
+   * @param consumer Consumer function for the separate objects.
+   *                 Contains the logic for the parsing of a single object.
+   *                 (E.g. () => consume(TokenKind.IDENTIFIER))
+   * @tparam T Type argument for the type of the consumed object. (E.g. Token)
+   * @return A list with consumed objects.
+   */
+  private def parseCommaList[T](consumer: () => Either[String, T]): Either[String, List[T]] =
+    parseSeparatedList[T](consumer, TokenKind.COMMA)
 
   /**
    * Parse a TLA+ module.
@@ -2224,11 +2256,12 @@ class Parser(lexer: Tokenizer) {
   /**
    * Parse a single EPC specification unit.
    *
-   * EPCSpecUnit := ChannelDefinition | ThreadDefinition | Network
+   * EPCSpecUnit := ChannelDefinition | SuspiciousChannelDefinition | ThreadDefinition | Network
    */
   private def parseEPCSpecUnit(): Either[String, EPCSpecUnit] =
     lexer.peek() match {
       case Token(TokenKind.EPC_NEW, _, _, _) => parseChannelDefinition()
+      case Token(TokenKind.EPC_SUSPCHAN, _, _, _) => parseSuspiciousChannelDefinition()
       case Token(TokenKind.EPC_DEF, _, _, _) => parseThreadDefinition()
       case _ => parseNetwork()
     }
@@ -2288,6 +2321,19 @@ class Parser(lexer: Tokenizer) {
       _ <- consume(TokenKind.EPC_NEW)
       identifier <- parseIdentifier()
     } yield ChannelDefinition(identifier)
+
+  /**
+   * Parse a suspicious channel definition.
+   *
+   * SuspiciousChannelDefinition := 'suspchan' CommaList(Identifier)
+   *
+   * E.g. suspchan c1, c2
+   */
+  def parseSuspiciousChannelDefinition(): Either[String, SuspiciousChannelDefinition] =
+    for {
+      _ <- consume(TokenKind.EPC_SUSPCHAN)
+      identifiers <- parseCommaListOfIdentifiers()
+    } yield SuspiciousChannelDefinition(identifiers)
 
   /**
    * Parse a travelling message.
@@ -2411,7 +2457,11 @@ class Parser(lexer: Tokenizer) {
         else if check(TokenKind.LEFT_ANGLE_BRACKET)
           then parseAssignment()
         else if check(TokenKind.IDENTIFIER)
-          then parseReceive()
+          then parseChoice()
+        else if check(List(TokenKind.LEFT_ROUND_BRACKET, TokenKind.IDENTIFIER, TokenKind.EQ))
+          then parseIndexedSumChoice()
+        else if check(List(TokenKind.LEFT_ROUND_BRACKET, TokenKind.IDENTIFIER, TokenKind.SET_IN))
+          then parseIndexedSumChoice()
         else if check(TokenKind.EPC_MULTISET_OPEN)
           then parseSend()
         else Left(error("EPC action expected"))
@@ -2465,6 +2515,30 @@ class Parser(lexer: Tokenizer) {
     } yield Receive(channel, location, variable)
 
   /**
+   * Parses a choice of multiple receive actions.
+   * If the choice contains only one receive action, it is returned as a receive action!
+   *
+   * Choice := Receive ['+' Receive]*
+   *
+   * E.g. c@1?(x) + c@2?(x)
+   */
+  def parseChoice(): Either[String, Receive | Choice] = for {
+    choices <- parseSeparatedList[Receive](() => parseReceive(), TokenKind.PLUS)
+  } yield if choices.length == 1 then choices.head else Choice(choices)
+
+  /**
+   * Parses choices given as indexed sums.
+   *
+   * IndexedSumChoice := Enumerator Receive
+   *
+   * E.g. (j \in 1..N) c@j?(x)
+   */
+  def parseIndexedSumChoice(): Either[String, IndexedSumChoice] = for {
+    enumerator <- parseEnumerator()
+    receive <- parseReceive()
+  } yield IndexedSumChoice(enumerator, receive)
+
+  /**
    * Parse a send action.
    *
    * Send := MultiSet(OutgoingMessage)
@@ -2496,6 +2570,7 @@ class Parser(lexer: Tokenizer) {
       case Token(TokenKind.EPC_VAR, _, _, _) => parseAction()
       case Token(TokenKind.LEFT_ANGLE_BRACKET, _, _, _) => parseAction()
       case Token(TokenKind.IDENTIFIER, _, _, _) => parseAction()
+      case Token(TokenKind.LEFT_ROUND_BRACKET, _, _, _) => parseAction()
       case Token(TokenKind.EPC_MULTISET_OPEN, _, _, _) => parseAction()
       // Conditional Threads
       case Token(TokenKind.EPC_IF, _, _, _) => parseConditionalThread()
