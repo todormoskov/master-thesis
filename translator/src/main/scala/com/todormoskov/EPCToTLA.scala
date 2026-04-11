@@ -24,8 +24,15 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   private val THD = "thd"
   private val CHAN = "_chan"
   private val SUSPCHAN = "_suspchan"
-  private val TRUSTED_IMMORTAL = "trim"
+  private val SUSPECT_OK = "suspectOK"
+  private val SUSPECTED = "suspected"
+  private val SUSPECTOR = "suspector"
+  private val CURRENT_TI = "currentTI"
+  private val CURRENT_F = "currentF"
+  private val TRUSTED_IMMORTAL_SET = "TI"
+  private val NEW_TRUSTED_IMMORTAL_SET = "ti"
   private val FAILED_SET = "F"
+  private val NEW_FAILED_SET = "f"
   private val _AE = "AE"
   private val _O = "O"
   private val _D = "D"
@@ -34,7 +41,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   private val DONE = "Done"
   private val VARS = "vars"
   private val INIT = "Init"
-  private val FAIL = "Fail"
+  private val ENV = "Env"
   private val TERMINATING = "Terminating"
   private val NEXT = "Next"
   private val SPEC = "Spec"
@@ -53,8 +60,15 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   private val thd = Identifier(THD)
   private val chan = Identifier(CHAN)
   private val suspchan = Identifier(SUSPCHAN)
-  private val trim = Identifier(TRUSTED_IMMORTAL)
+  private val suspectOK = Identifier(SUSPECT_OK)
+  private val suspected = Identifier(SUSPECTED)
+  private val suspector = Identifier(SUSPECTOR)
+  private val currentTI = Identifier(CURRENT_TI)
+  private val currentF = Identifier(CURRENT_F)
+  private val TI = Identifier(TRUSTED_IMMORTAL_SET)
+  private val ti = Identifier(NEW_TRUSTED_IMMORTAL_SET)
   private val F = Identifier(FAILED_SET)
+  private val f = Identifier(NEW_FAILED_SET)
   private val AE = Identifier(_AE)
   private val O = Identifier(_O)
   private val D = Identifier(_D)
@@ -63,7 +77,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   private val Done = Literal(DONE)
   private val vars = Identifier(VARS)
   private val Init = Identifier(INIT)
-  private val Fail = Identifier(FAIL)
+  private val Env = Identifier(ENV)
   private val Terminating = Identifier(TERMINATING)
   private val Next = Identifier(NEXT)
   private val Spec = Identifier(SPEC)
@@ -103,7 +117,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     // which appear in the memory of a location or are declared with the 'var' keyword.
     // Additionally, we create a variable for the program counters (pc) of the different locations
     // and their threads. Finally, we create variables for each channel, with the same name as the channel.
-    val trimOption = Option.when(epcCtx.weakAccuracyConfigured) (trim)
+    val TIOption = Option.when(epcCtx.weakAccuracyConfigured) (TI)
     val FOption = Option.when(epcCtx.failStopConfigured) (F)
     val AEOption = Option.when(declaredChannels.nonEmpty)(AE)
     val OOption = Option.when(epcCtx.specWithMultiSends)(O)
@@ -111,7 +125,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     val raOption = Option.when(epcCtx.thdDefinitionsToOperations.nonEmpty)(ra)
     val locationVariables = epcCtx.variablesToLocations.keys.toList
     val locationVariablesWithImplicitVars = locationVariables ++ DOption
-    val allTLAVariables = List() ++ trimOption ++ FOption ++ AEOption ++ OOption ++ DOption ++ List(pc) ++ raOption ++ locationVariables
+    val allTLAVariables = List() ++ TIOption ++ FOption ++ AEOption ++ OOption ++ DOption ++ List(pc) ++ raOption ++ locationVariables
     val variablesDeclaration = VariableDeclaration(Token(TokenKind.VARIABLES, VARIABLES, -1, -1), allTLAVariables)
     tlaStringBuilder.appendUnit(variablesDeclaration, newlines = 2)
     // Add all TLA variables to the set with known identifiers.
@@ -162,6 +176,18 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       tlaStringBuilder.appendNewline()
     )
 
+    // Generate the suspectOK predicate when WeakAccuracy is configured
+    val suspectOKOnWeakAccuracy = Option.when(epcCtx.weakAccuracyConfigured)(
+      OperatorDefinition(
+        NonFixLHS(suspectOK, List(currentTI, currentF, suspected, suspector)),
+        BinaryExpression("/\\", BinaryExpression("#", currentTI, emptySet), BinaryExpression("\\notin", suspected, currentTI))
+      )
+    )
+    suspectOKOnWeakAccuracy.foreach(suspectOKDefinition =>
+      tlaStringBuilder.appendUnit(suspectOKDefinition)
+      tlaStringBuilder.appendNewline()
+    )
+
     generateInitStatePredicate()
     val locationOperators = translateLocations(locationVariablesWithImplicitVars, allTLAVariables)
     val threadDefinitionOperators = translateThreadDefinitions(locationVariablesWithImplicitVars, allTLAVariables)
@@ -194,8 +220,8 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
    * Generates the initial state predicate.
    */
   private def generateInitStatePredicate(): Unit = {
-    // trim is variable that identifies the "Trusted Immortal" and is used when then WeakAccuracy modifier is configured.
-    val trimInitialValue = Option.when(epcCtx.weakAccuracyConfigured)(BinaryExpression("\\in", trim, ProcSet))
+    // TI is variable that contains the "Trusted Immortal" locations and is used when then WeakAccuracy modifier is configured.
+    val TIInitialValue = Option.when(epcCtx.weakAccuracyConfigured)(BinaryExpression("=", TI, emptySet))
 
     // F is a variable that contains failed processes and is used only when the FailStop modifier is configured.
     val FInitialValue = Option.when(epcCtx.failStopConfigured)(BinaryExpression("=", F, emptySet))
@@ -228,7 +254,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
 
     // Generate the Init predicate
     val initPredicate = OperatorDefinition(NonFixLHS(Init, Nil), ConjunctionList(Nil
-          ++ trimInitialValue ++ FInitialValue ++ aeInitialValue ++ OInitialValue ++ DInitialValue
+          ++ TIInitialValue ++ FInitialValue ++ aeInitialValue ++ OInitialValue ++ DInitialValue
           ++ Option(pcInitialValue) ++ raInitialValue ++ locationVariablePredicates))
     // Add the Init predicate to the TLA builder.
     tlaStringBuilder.appendUnit(initPredicate)
@@ -442,7 +468,8 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         val generatedThreadActions = mutable.ListBuffer.empty[OperatorDefinition]
         // We go over all operations and translate them into TLA actions (some operations can be translated into multiple TLA actions.)
         // Assignments, send actions, and thread instantiations have one corresponding TLA action.
-        // Receive actions (in the case of weak accuracy) and conditional threads are translated into two TLA actions.
+        // Conditional threads are translated into two TLA actions.
+        // Receive actions are translated into three TLA actions, when there are suspicious channels in the specification.
         for {
           (operation, operationIdx) <- flattenedRegion.zipWithIndex
           (tlaAction, tlaActionIdx) <- translateOperation(Some(locEnum), Some(thdEnum), None, operation, flattenedRegion, edges, locationVariables, tlaVariables).zipWithIndex
@@ -501,7 +528,8 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       val generatedThreadActions = mutable.ListBuffer.empty[OperatorDefinition]
       // We go over all operations and translate them into TLA actions (some operations can be translated into multiple TLA actions.)
       // Assignments, send actions, and thread instantiations have one corresponding TLA action.
-      // Receive actions (in the case of weak accuracy) and conditional threads are translated into two TLA actions.
+      // Conditional threads are translated into two TLA actions.
+      // Receive actions are translated into three TLA actions, when there are suspicious channels in the specification.
       for {
         (operation, operationIdx) <- flattenedRegion.zipWithIndex
         (tlaAction, tlaActionIdx) <- translateOperation(None, None, Some(thdIdentifier), operation, flattenedRegion, edges, locationVariables, tlaVariables).zipWithIndex
@@ -538,17 +566,52 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
    * Generates the remaining spec operators, such as (Fail), Terminating, Next, Spec, Termination.
    */
   private def generateRemainingSpecOperators(tlaVariables: List[Identifier], locationDisjunctions: List[OperatorDefinition], definedThreadDisjunctions: List[OperatorDefinition]): Unit = {
-    // Optionally generate the Fail operator
-    val failOption = Option.when (epcCtx.failStopConfigured) (OperatorDefinition(
-      NonFixLHS(Fail, Nil),
-      BoundedQuantifiedExpression("\\E", List(selfInProcSetMaybeWithoutF), ConjunctionList(Nil
-        ++ Option.when(epcCtx.weakAccuracyConfigured)(BinaryExpression("#", self, trim))
-        ++ Some(BinaryExpression("=", PrimedExpression(F), BinaryExpression("\\cup", F, ExplicitSet(List(self)))))
+    val lowerCaseTI = getUniqueIdentifier(ti)
+    val lowerCaseF = getUniqueIdentifier(f)
+    // "Env" operator when only fail-stop is configured
+    val envOnFailStop = Option.when (epcCtx.failStopConfigured && !epcCtx.weakAccuracyConfigured) (OperatorDefinition(
+      NonFixLHS(Env, Nil),
+      // \E f \in SUBSET (ProcSet \ F):
+      //    /\ failOK(F, f)
+      //    /\ F' = F \cup f
+      //    /\ UNCHANGED ...
+      BoundedQuantifiedExpression("\\E", List(QuantifierBound(lowerCaseF,
+        UnaryExpression("SUBSET", ParenthesizedExpression(BinaryExpression("\\", ProcSet, F)))
+      )), ConjunctionList(Nil
+        ++ Option.when(epcCtx.visibleTLAOperators.contains("failOK"))(IdentifierApplication(Identifier("failOK"), List(F, lowerCaseF)))
+        ++ Some(BinaryExpression("=", PrimedExpression(F), BinaryExpression("\\cup", F, lowerCaseF)))
         ++ Some(UnchangedExpr(getUnchangedVars(tlaVariables, List(F))))
       ))
     ))
     // Add the Fail operator to the TLA builder.
-    failOption.foreach(failDefinition =>
+    envOnFailStop.foreach(failDefinition =>
+      tlaStringBuilder.appendUnit(failDefinition)
+      tlaStringBuilder.appendNewline()
+    )
+
+    // "Env" operator when fail-stop and (eventual) weak accuracy are configured
+    val envOption = Option.when(epcCtx.failStopConfigured && epcCtx.weakAccuracyConfigured)(OperatorDefinition(
+      NonFixLHS(Env, Nil),
+      // \E ti, f \in SUBSET (ProcSet \ (TI \cup F)):
+      //    /\ ti \cap f # {}
+      //    /\ failOK(F, f)
+      //    /\ TI' = TI \cup ti
+      //    /\ F' = F \cup f
+      //    /\ UNCHANGED ...
+      BoundedQuantifiedExpression("\\E", List(QuantifierBound(List(lowerCaseTI, lowerCaseF),
+        UnaryExpression("SUBSET", ParenthesizedExpression(
+          BinaryExpression("\\", ProcSet, ParenthesizedExpression(BinaryExpression("\\cup", TI, F)))
+        ))
+      )), ConjunctionList(Nil
+        ++ Some(BinaryExpression("=", BinaryExpression("\\cap", lowerCaseTI, lowerCaseF), emptySet))
+        ++ Option.when(epcCtx.visibleTLAOperators.contains("failOK"))(IdentifierApplication(Identifier("failOK"), List(F, lowerCaseF)))
+        ++ Some(BinaryExpression("=", PrimedExpression(TI), BinaryExpression("\\cup", TI, lowerCaseTI)))
+        ++ Some(BinaryExpression("=", PrimedExpression(F), BinaryExpression("\\cup", F, lowerCaseF)))
+        ++ Some(UnchangedExpr(getUnchangedVars(tlaVariables, List(TI, F))))
+      ))
+    ))
+    // Add the Fail operator to the TLA builder.
+    envOption.foreach(failDefinition =>
       tlaStringBuilder.appendUnit(failDefinition)
       tlaStringBuilder.appendNewline()
     )
@@ -557,41 +620,46 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     val terminatingOption = Option.when (epcCtx.terminatingConfigured) (OperatorDefinition(
       NonFixLHS(Terminating, Nil), ConjunctionList(List(generateTerminationPredicate(), UnaryExpression("UNCHANGED", vars)))
     ))
+    // Add the Terminating operator to the TLA builder.
     terminatingOption.foreach(terminatingDefinition =>
-      // Add the Terminating operator to the TLA builder.
       tlaStringBuilder.appendUnit(terminatingDefinition)
       tlaStringBuilder.appendNewline()
     )
 
     // Generate the Next action
-    val nextDefinition = OperatorDefinition(NonFixLHS(Next, Nil),
-      foldToDisjunction(locationDisjunctions ++ definedThreadDisjunctions ++ failOption ++ terminatingOption)
-    )
+    val nextActions = locationDisjunctions ++ definedThreadDisjunctions ++ envOnFailStop ++ envOption ++ terminatingOption
+    val nextOperatorOption = Option.when(nextActions.nonEmpty)(OperatorDefinition(NonFixLHS(Next, Nil), foldToDisjunction(nextActions)))
     // Add the Next operator to the TLA builder.
-    tlaStringBuilder.appendUnit(nextDefinition)
-    tlaStringBuilder.appendNewline()
+    nextOperatorOption.foreach(nextOperator =>
+      tlaStringBuilder.appendUnit(nextOperator)
+      tlaStringBuilder.appendNewline()
+    )
 
     // Generate the specification Spec
-    val specDefinition = OperatorDefinition(
-      NonFixLHS(Spec, Nil),
-      if !epcCtx.nextWFConfigured
+    val specOperatorOption = nextOperatorOption.map(_ =>
+      OperatorDefinition(
+        NonFixLHS(Spec, Nil),
+        if !epcCtx.nextWFConfigured
         then BinaryExpression("/\\", Init, UnaryExpression("[]", WeakStuttering(Next, vars)))
         else BinaryExpression("/\\",
           BinaryExpression("/\\", Init, UnaryExpression("[]", WeakStuttering(Next, vars))),
           WeakFairness(vars, Next)
         )
+      )
     )
     // Add the Spec operator to the TLA builder.
-    tlaStringBuilder.appendUnit(specDefinition)
-    tlaStringBuilder.appendNewline()
+    specOperatorOption.foreach(specOperator =>
+      tlaStringBuilder.appendUnit(specOperator)
+      tlaStringBuilder.appendNewline()
+    )
 
     // Generate the Termination definition
     val terminationOption = Option.when (epcCtx.terminationConfigured) (OperatorDefinition(
       NonFixLHS(Termination, Nil),
       UnaryExpression("<>", ParenthesizedExpression(generateTerminationPredicate()))
     ))
+    // Add the Terminating operator to the TLA builder.
     terminationOption.foreach(terminationDefinition =>
-      // Add the Terminating operator to the TLA builder.
       tlaStringBuilder.appendUnit(terminationDefinition)
       tlaStringBuilder.appendNewline()
     )
@@ -1181,6 +1249,10 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     // We require that the source location in the "receive" action is a process.
     // E.g. <location-expression> \in ProcSet
     val sourceIsInProcSet = BinaryExpression("\\in", sourceExpr, ProcSet)
+    // We require that the suspectOK-predicate is satisfied
+    val suspectOKOptionOnWeakAccuracy = Option.when(epcCtx.weakAccuracyConfigured)(
+      IdentifierApplication(suspectOK, List(TI, F, sourceExpr, self))
+    )
     // We update the D component of the executing location
     // D' = [D EXCEPT ![self][channelExpr][sourceExpr] = FALSE]
     val DComponentUpdate = BinaryExpression("=", PrimedExpression(D),
@@ -1188,7 +1260,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         IndexSelector(List(self)), IndexSelector(List(channelExpr)), IndexSelector(List(sourceExpr)))),
         Literal(false))))
     )
-    val suspectConjuncts = List(channelIsInSuspChanSet, sourceIsInProcSet, DComponentUpdate)
+    val suspectConjuncts = List(channelIsInSuspChanSet, sourceIsInProcSet) ++ suspectOKOptionOnWeakAccuracy ++ List(DComponentUpdate)
     // If an enumerator is provided (this the case when the "receive" action is given as an indexed sum),
     // we map the enumerator to a binder and an index set, and we wrap all generated equations in it.
     // E.g. (j \ in 1..N) c@j?(x) --> /\ \E j \in 1..N : /\ c \in SuspChanSet /\ ...

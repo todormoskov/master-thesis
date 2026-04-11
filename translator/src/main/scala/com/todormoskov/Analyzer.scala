@@ -88,9 +88,9 @@ object Analyzer {
         else map addOne key -> ListBuffer(value)
 
       def visitEPCSpecUnit(ast: EPCSpecUnit): Unit = ast match {
-        case ChannelDefinition(identifier) =>
-          // Add the channel to the channels set
-          channels += identifier
+        case ChannelDefinition(identifiers) =>
+          // Add the channels to the channels set
+          channels ++= identifiers
         case SuspiciousChannelDefinition(identifiers) =>
           // Add the suspicious channels to both sets ChanSet and SuspChanSet
           channels ++= identifiers

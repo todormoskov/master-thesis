@@ -1426,4 +1426,13 @@ class LexerTest extends AnyFunSuite {
       )
     )
   }
+
+  test("Recognizes EPC skip elements") {
+    val inputSpec =
+      """skip""".stripMargin
+
+    val tokens = recognizeTokens(inputSpec)
+    assert(tokens == List(Token(TokenKind.EPC_SKIP, "skip", 1, 1), Token(TokenKind.EOF, null, 1, 5)))
+  }
+
 }

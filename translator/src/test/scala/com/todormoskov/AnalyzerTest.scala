@@ -42,8 +42,8 @@ class AnalyzerTest extends AnyFunSuite {
         | EXTENDS Integers
         |
         | (* --EPC SomeEPCSpec
-        | new c1
-        | new c2
+        | chan c1
+        | chan c2
         | *)
         | ====
         |""".stripMargin
@@ -245,7 +245,7 @@ class AnalyzerTest extends AnyFunSuite {
         | EXTENDS Integers
         |
         | (* --EPC SomeEPCSpec
-        | new c
+        | chan c
         |
         | (p = 1)[[ [] <| (j = 1) ( {{}} ) ]]
         | ||
@@ -280,7 +280,7 @@ class AnalyzerTest extends AnyFunSuite {
         | EXTENDS Integers
         |
         | (* --EPC SomeEPCSpec
-        | new c
+        | chan c
         |
         | (p = 1) [[
         |   [] <|
@@ -347,7 +347,7 @@ class AnalyzerTest extends AnyFunSuite {
         | EXTENDS Integers
         |
         | (* --EPC SomeEPCSpec
-        | new c
+        | chan c
         |
         | (p = 1) [[
         |   [] <|
@@ -417,7 +417,7 @@ class AnalyzerTest extends AnyFunSuite {
         | EXTENDS Integers
         |
         | (* --EPC SomeEPCSpec
-        | new c
+        | chan c
         |
         | (p = 1) [[
         |   [ x |-> 0, y |-> 0 ]
@@ -505,7 +505,7 @@ class AnalyzerTest extends AnyFunSuite {
         | EXTENDS Integers
         |
         | (* --EPC SomeEPCSpec
-        | new c
+        | chan c
         |
         | (p = 1) [[
         |   [ x |-> 0, y |-> 0 ]
@@ -593,7 +593,7 @@ class AnalyzerTest extends AnyFunSuite {
         | EXTENDS Integers
         |
         | (* --EPC SomeEPCSpec
-        | new c
+        | chan c
         |
         | def incrementX(x) = << x := x + 1 >>; incrementX()
         |
@@ -652,7 +652,7 @@ class AnalyzerTest extends AnyFunSuite {
         | CONSTANTS N
         |
         | (* --EPC SomeEPCSpec
-        | new c
+        | chan c
         |
         | (p = 0) [[
         |   [x |-> 0] <|
@@ -684,7 +684,7 @@ class AnalyzerTest extends AnyFunSuite {
         | CONSTANTS N
         |
         | (* --EPC SomeEPCSpec
-        | new c
+        | chan c
         |
         | (p = 0) [[
         |   [x |-> 0] <|
@@ -716,7 +716,7 @@ class AnalyzerTest extends AnyFunSuite {
         | CONSTANTS N
         |
         | (* --EPC SomeEPCSpec
-        | new c
+        | chan c
         |
         | (p = 0) [[
         |   [x |-> 0] <|
@@ -748,7 +748,7 @@ class AnalyzerTest extends AnyFunSuite {
         | CONSTANTS N
         |
         | (* --EPC SomeEPCSpec
-        | new c
+        | chan c
         |
         | def sendMessages(x) = {{ (j \in 1..N) c@j<< x >> }}
         |

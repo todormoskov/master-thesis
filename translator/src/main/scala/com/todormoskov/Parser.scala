@@ -337,11 +337,11 @@ case class BoundedEnumerator(name: Identifier, equalOrIn: String, domain: Expres
  */
 case class BoundedEnumeratorWithFilter(name: Identifier, equalOrIn: String, domain: Expression, filter: Expression) extends Enumerator
 /**
- * ChannelDefinition := 'new' Identifier
+ * ChannelDefinition := 'chan' Identifier
  *
- * E.g. new c
+ * E.g. chan c
  */
-case class ChannelDefinition(identifier: Identifier) extends EPCSpecUnit
+case class ChannelDefinition(identifiers: List[Identifier]) extends EPCSpecUnit
 /**
  * SuspiciousChannelDefinition := 'suspchan' CommaList(Identifier)
  *
@@ -427,7 +427,7 @@ case class ConditionalThread(cond: Expression, thenThread: Thread, elseThread: T
  */
 case class ThreadInstantiation(thread: Identifier) extends AST
 /**
- * Command := Action | ConditionalThread | ThreadInstantiation
+ * Command := Action | ConditionalThread | ThreadInstantiation | Skip
  */
 type Command = Action | ConditionalThread | ThreadInstantiation
 /**
@@ -2260,7 +2260,7 @@ class Parser(lexer: Tokenizer) {
    */
   private def parseEPCSpecUnit(): Either[String, EPCSpecUnit] =
     lexer.peek() match {
-      case Token(TokenKind.EPC_NEW, _, _, _) => parseChannelDefinition()
+      case Token(TokenKind.EPC_CHAN, _, _, _) => parseChannelDefinition()
       case Token(TokenKind.EPC_SUSPCHAN, _, _, _) => parseSuspiciousChannelDefinition()
       case Token(TokenKind.EPC_DEF, _, _, _) => parseThreadDefinition()
       case _ => parseNetwork()
@@ -2318,9 +2318,9 @@ class Parser(lexer: Tokenizer) {
    */
   def parseChannelDefinition(): Either[String, ChannelDefinition] =
     for {
-      _ <- consume(TokenKind.EPC_NEW)
-      identifier <- parseIdentifier()
-    } yield ChannelDefinition(identifier)
+      _ <- consume(TokenKind.EPC_CHAN)
+      identifiers <- parseCommaListOfIdentifiers()
+    } yield ChannelDefinition(identifiers)
 
   /**
    * Parse a suspicious channel definition.
@@ -2560,7 +2560,7 @@ class Parser(lexer: Tokenizer) {
   /**
    * Parse a command.
    *
-   * Command := Action | ConditionalThread | Instantiation
+   * Command := Action | ConditionalThread | Instantiation | Skip
    */
   private def parseCommand(): Either[String, Command] =
     if check(List(TokenKind.IDENTIFIER, TokenKind.LEFT_ROUND_BRACKET, TokenKind.RIGHT_ROUND_BRACKET))
@@ -2574,6 +2574,8 @@ class Parser(lexer: Tokenizer) {
       case Token(TokenKind.EPC_MULTISET_OPEN, _, _, _) => parseAction()
       // Conditional Threads
       case Token(TokenKind.EPC_IF, _, _, _) => parseConditionalThread()
+      // skip elements
+      case Token(TokenKind.EPC_SKIP, _, _, _) => parseSkip()
       case _ => Left(error("EPC command expected"))
     }
 
@@ -2604,10 +2606,24 @@ class Parser(lexer: Tokenizer) {
       condition <- parseExpression()
       _ <- consume(TokenKind.EPC_THEN)
       thenThread <- parseThread()
-      _ <- consume(TokenKind.EPC_ELSE)
-      elseThread <- parseThread()
-      _ <- consume(TokenKind.EPC_FI)
+      elseThread <- if check(TokenKind.EPC_ELSE)
+        then for {
+          _ <- consume(TokenKind.EPC_ELSE)
+          elseThread <- parseThread()
+          _ <- consume(TokenKind.EPC_FI)
+        } yield elseThread
+        else for {
+          // When the "else" thread is skipped, we add a thread with an empty send action.
+          _ <- consume(TokenKind.EPC_FI)
+        } yield List(ThreadUnit(None, Send(ExplicitMultiSet(Nil))))
     } yield ConditionalThread(condition, thenThread, elseThread)
+
+  /**
+   * Parse a "skip" element. When parsing a "skip" element, we simply turn it into an empty send action,
+   * since these are essentially the same element and the rest of the compiler already works with empty send actions.
+   */
+  private def parseSkip(): Either[String, Send] =
+    for (_ <- consume(TokenKind.EPC_SKIP)) yield Send(ExplicitMultiSet(Nil))
 
   /**
    * ThreadUnit := [Identifier ':']? Command
@@ -2632,7 +2648,8 @@ class Parser(lexer: Tokenizer) {
     TokenKind.EPC_VAR,
     TokenKind.LEFT_ANGLE_BRACKET,
     TokenKind.EPC_MULTISET_OPEN,
-    TokenKind.EPC_IF)
+    TokenKind.EPC_IF,
+    TokenKind.EPC_SKIP)
 
   /**
    * Check if the next token is one of the possible first tokens of a thread unit.

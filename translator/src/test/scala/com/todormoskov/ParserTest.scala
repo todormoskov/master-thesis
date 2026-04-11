@@ -2086,13 +2086,11 @@ class ParserTest extends AnyFunSuite {
 
   test("Parses channel definitions") {
     val inputSpec =
-      """new c""".stripMargin
+      """chan c1, c2""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseChannelDefinition().toOption.get
     assert(ast ==
-      ChannelDefinition(
-        Identifier("c"),
-      )
+      ChannelDefinition(List(Identifier("c1"), Identifier("c2")))
     )
   }
 
@@ -2401,6 +2399,21 @@ class ParserTest extends AnyFunSuite {
   test("Parses empty processes") {
     val inputSpec =
       """ {{ }} """.stripMargin
+
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
+    assert(ast ==
+      List(
+        ThreadUnit(
+          None,
+          Send(ExplicitMultiSet(Nil))
+        )
+      )
+    )
+  }
+
+  test("Parses skip threads") {
+    val inputSpec =
+      """ skip """.stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseThread().toOption.get
     assert(ast ==
@@ -2974,7 +2987,7 @@ class ParserTest extends AnyFunSuite {
     val inputSpec =
       """
         |(* --EPC Consensus
-        | new c
+        | chan c
         |
         | (l \in 1..n) [[
         |   [ channel |-> c,
@@ -3002,7 +3015,7 @@ class ParserTest extends AnyFunSuite {
           Nil,
           List(
             ChannelDefinition(
-              Identifier("c")
+              List(Identifier("c"))
             ),
             Location(
               BoundedEnumerator(

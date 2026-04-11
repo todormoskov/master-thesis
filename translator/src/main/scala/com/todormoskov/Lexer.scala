@@ -151,6 +151,7 @@ object Lexer {
     EPC_THEN,
     EPC_ELSE,
     EPC_FI,
+    EPC_SKIP,
     EPC_DEF,
     EPC_UNDEFINED,
     EPC_INITIALIZED,
@@ -688,6 +689,7 @@ object Lexer {
             case "then" => Token(TokenKind.EPC_THEN, name, lineNum, col)
             case "else" => Token(TokenKind.EPC_ELSE, name, lineNum, col)
             case "fi" => Token(TokenKind.EPC_FI, name, lineNum, col)
+            case "skip" => Token(TokenKind.EPC_SKIP, name, lineNum, col)
             case "def" => Token(TokenKind.EPC_DEF, name, lineNum, col)
             // case "Undefined" => Token(TokenKind.EPC_UNDEFINED, name)
             // case "Initialized" => Token(TokenKind.EPC_INITIALIZED, name)
