@@ -1284,23 +1284,31 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         // Empty send commands are filtered before we reach this code, so we do nothing!
         Nil
       case ExplicitMultiSet(singleMsg :: Nil) =>
+        // We rewrite the EPC expressions to their TLA+ representation
+        val channelExpr = rewriteAccessToLocationVariables(singleMsg.channel, locationVariables)
+        val targetExpr = rewriteAccessToLocationVariables(singleMsg.target, locationVariables)
+        // We prepare the send preconditions:
+        // 1) the channel should be an element of ChanSet
+        // 2) the target location should be an element of ProcSet
+        val channelPrecondition = BinaryExpression("\\in", channelExpr, ChanSet)
+        val targetPrecondition = BinaryExpression("\\in", targetExpr, ProcSet)
         // Sending a single message means that we send it directly, so we simply need to update the channel!
         val channelUpdate = generateChannelUpdateForSingleSend(singleMsg, locationVariables)
         val pcUpdate = PCUpdate(successorLabel)
-        List(channelUpdate)
+        List(channelPrecondition, targetPrecondition, channelUpdate)
           ++ pcUpdateUnlessOnThreadExit
           ++ pcUpdateOnThreadExit
           ++ raUpdateOnThreadExit
       case ExplicitMultiSet(multipleMessages) =>
         // Sending multiple messages means that we also need to remember what was sent so far.
         // The implementation of the Send command is based on existential quantification over the set of messages
-        // that are still not send. Since we cannot simply send a multiset of all messages at once (since the values
+        // that are still not send. Since we cannot simply send a multiset of all messages at once (because the values
         // of the target and value expressions in the messages can change between sending two messages; this can happen
         // if we have a separate thread in the same location, which updates the variables used in the message),
         // we will use a set of indices to remember, which messages were already send. This means that the O variable
         // will contain exactly those indices.
         //
-        // E.g. if we need to send two messages, lets say {{ c@2!"Hello", c@3!"Hello" }},
+        // E.g. if we need to send two messages, lets say {{ c@2<<"Hello">>, c@3<<"Hello">> }},
         // we create the set 1..2 and maintain O[self][thd], which should initially be empty,
         // then \E i \in 1..2 \ O[self][thd]: ... will give us the index of the next message to send.
         // The changes will include a change in the channel based on a case distinction for the different indices:
@@ -1324,6 +1332,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         List(
           BoundedQuantifiedExpression("\\E", List(QuantifierBound(indexBinder, remainingIndices)), ConjunctionList(
             List(
+              generatePreconditionForMultiSend(indexBinder, multipleMessages, locationVariables),
               generateChannelUpdateForMultiSend(indexBinder, multipleMessages, locationVariables),
               generatePCUpdateForMultiSend(indexBinder, allIndices, thdIdentifierOption, successorLabel))
               ++ raUpdateOnThreadExitForMultiSend
@@ -1334,16 +1343,26 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         // Sending a quantified set of messages also means that we also need to remember what was sent so far.
         // Add the whole multiset as a SetToBag({...}) to the channel.
         // Since the bounded enumerator is defined with an equal sign "=", then it will be translated to a single message.
-        // E.g. {{ (j = 1) c@j!<<j>> }}
+        // E.g. {{ (j = 1) c@j<<j>> }}
         // Still, we need to the bounded variable, so we turn the domain into a set. This example will be translated into:
         // SetToBag({ << self, j, j >> })
         val (boundVariable, indexSet) = enumeratorToBoundVariableAndIndexSetWithRewrite(enumerator, locationVariables)
         val alreadySend = FunctionApplication(FunctionApplication(O, List(self)), List(thd))
         val remainingIndices = BinaryExpression("\\", indexSet, alreadySend)
         val raUpdateOnThreadExitForMultiSend = Option.when(isThreadExit)(generateRAUpdateForMultiSend(boundVariable, indexSet))
+        // We rewrite the EPC expressions to their TLA+ representation
+        val channelExpr = rewriteAccessToLocationVariables(message.channel, locationVariables)
+        val targetExpr = rewriteAccessToLocationVariables(message.target, locationVariables)
+        // We prepare the send preconditions:
+        // 1) the channel should be an element of ChanSet
+        // 2) the target location should be an element of ProcSet
+        val channelPrecondition = BinaryExpression("\\in", channelExpr, ChanSet)
+        val targetPrecondition = BinaryExpression("\\in", targetExpr, ProcSet)
         List(
           BoundedQuantifiedExpression("\\E", List(QuantifierBound(boundVariable, remainingIndices)), ConjunctionList(
             List(
+              channelPrecondition,
+              targetPrecondition,
               generateChannelUpdateForSingleSend(message, locationVariables),
               generatePCUpdateForMultiSend(boundVariable, indexSet, thdIdentifierOption, successorLabel))
             ++ raUpdateOnThreadExitForMultiSend
@@ -1400,15 +1419,20 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   }
 
   private def generateChannelUpdateForSingleSend(singleMsg: OutgoingMessage, locationVariables: List[Identifier]) = {
+    // We rewrite the EPC expressions to their TLA+ representation
+    val channelExpr = rewriteAccessToLocationVariables(singleMsg.channel, locationVariables)
+    val targetExpr = rewriteAccessToLocationVariables(singleMsg.target, locationVariables)
+    val valueExpr = rewriteAccessToLocationVariables(singleMsg.value, locationVariables)
+    // Create the conjunct with the update of the message aether variable AE:
     // AE' = [AE EXCEPT ![c] = AE[c] (+) SetToBag({<<self,2,x[self]>>})]
     BinaryExpression("=", PrimedExpression(AE),
       ExceptExpression(AE, List(
-        ExceptClause(SelectorPath(List(IndexSelector(List(singleMsg.channel)))),
+        ExceptClause(SelectorPath(List(IndexSelector(List(channelExpr)))),
           // AE[c] (+) SetToBag({ << self, 2, x[self] >> })
-          BinaryExpression("(+)", FunctionApplication(AE, List(singleMsg.channel)),
+          BinaryExpression("(+)", FunctionApplication(AE, List(channelExpr)),
             IdentifierApplication(SetToBag, List(ExplicitSet(List(
               // Here, we create a triple of the form << self, target, value >>
-              Tuple(List(self, rewriteAccessToLocationVariables(singleMsg.target, locationVariables), rewriteAccessToLocationVariables(singleMsg.value, locationVariables))))))
+              Tuple(List(self, targetExpr, valueExpr)))))
             )
           )
         )
@@ -1416,23 +1440,59 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     )
   }
 
+  private def generatePreconditionForMultiSend(indexBinder: Identifier, multipleMessages: List[OutgoingMessage], locationVariables: List[Identifier]) = {
+    // Create the conjunct with the preconditions for the multi-send action:
+    // E.g. {{ c@2<<"Hello">>, c@2<<""Hello">> }}
+    // CASE i = 1 -> /\ c \in ChanSet
+    //               /\ 2 \in ProcSet
+    // []   i = 2 -> /\ c \in ChanSet
+    //               /\ 2 \in ProcSet
+    CaseExpression(
+      for ((message, idx) <- multipleMessages.zipWithIndex) yield {
+        // We rewrite the EPC expressions to their TLA+ representation
+        val channelExpr = rewriteAccessToLocationVariables(message.channel, locationVariables)
+        val targetExpr = rewriteAccessToLocationVariables(message.target, locationVariables)
+        val valueExpr = rewriteAccessToLocationVariables(message.value, locationVariables)
+        // Create the case arm with the update
+        CaseArm(
+          // CASE i = 1 ->
+          BinaryExpression("=", indexBinder, Literal(idx + 1)),
+          // ConjunctionList of the form:
+          // /\ c \in ChanSet
+          // /\ 2 \in ProcSet
+          ConjunctionList(List(
+            BinaryExpression("\\in", channelExpr, ChanSet),
+            BinaryExpression("\\in", targetExpr, ProcSet)
+          ))
+        )
+      },
+      None
+    )
+  }
+
   private def generateChannelUpdateForMultiSend(indexBinder: Identifier, multipleMessages: List[OutgoingMessage], locationVariables: List[Identifier]) = {
+    // Create the conjunct with the update of the message aether variable AE:
     // - AE' = CASE i = 1 -> [AE EXCEPT ![c] = AE[c] (+) SetToBag({ << self, 2, "Hello" >> })]
     //         []   i = 2 -> [AE EXCEPT ![c] = AE[c] (+) SetToBag({ << self, 2, "Hello" >> })]
     BinaryExpression("=", PrimedExpression(AE),
       CaseExpression(
         for ((message, idx) <- multipleMessages.zipWithIndex) yield {
+          // We rewrite the EPC expressions to their TLA+ representation
+          val channelExpr = rewriteAccessToLocationVariables(message.channel, locationVariables)
+          val targetExpr = rewriteAccessToLocationVariables(message.target, locationVariables)
+          val valueExpr = rewriteAccessToLocationVariables(message.value, locationVariables)
+          // Create the case arm with the update
           CaseArm(
             // CASE i = 1 ->
             BinaryExpression("=", indexBinder, Literal(idx + 1)),
             // [AE EXCEPT ![c] = AE[c] (+) SetToBag({ << self, 2, "Hello" >> })]
             ExceptExpression(AE, List(
-              ExceptClause(SelectorPath(List(IndexSelector(List(message.channel)))),
+              ExceptClause(SelectorPath(List(IndexSelector(List(channelExpr)))),
                 // AE[c] (+) SetToBag({ << self, 2, x[self] >> })
-                BinaryExpression("(+)", FunctionApplication(AE, List(message.channel)),
+                BinaryExpression("(+)", FunctionApplication(AE, List(channelExpr)),
                   IdentifierApplication(SetToBag, List(ExplicitSet(List(
                     // Here, we create a triple of the form << self, target, value >>
-                    Tuple(List(self, rewriteAccessToLocationVariables(message.target, locationVariables), rewriteAccessToLocationVariables(message.value, locationVariables))))))
+                    Tuple(List(self, targetExpr, valueExpr)))))
                   )
                 )
               )
