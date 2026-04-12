@@ -201,6 +201,26 @@ class TLAStringBuilder {
           appendString("[] OTHER -> ")
           appendExpression(expression)
         })
+      case LetInExpression(definitions, expression) =>
+        val letIndentation = column - 1
+        appendString("LET ")
+        val definitionsIndentation = column - 1
+        definitions.zipWithIndex.foreach((definition, idx) => {
+          // Currently, we don't handle function and module definitions
+          val operatorDef = definition.asInstanceOf[OperatorDefinition]
+          if (idx == 0) {
+            append(operatorDef)
+          }
+          else {
+            appendNewline()
+            appendString(" ".repeat(definitionsIndentation))
+            append(operatorDef)
+          }
+        })
+        appendNewline()
+        appendString(" ".repeat(letIndentation))
+        appendString("IN  ")
+        appendExpression(expression)
       case ChooseExpression(identifier, domain, predicate) =>
         appendString("CHOOSE ")
         appendExpression(identifier)

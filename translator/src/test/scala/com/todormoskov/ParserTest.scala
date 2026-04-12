@@ -1597,6 +1597,51 @@ class ParserTest extends AnyFunSuite {
     )
   }
 
+  test("Parses LET-IN expressions (1)") {
+    val inputSpec =
+      """LET IsEven(x) == x % 2 = 0
+        |IN IsEven(5) """.stripMargin
+    new Parser(Tokenizer(Scanner(inputSpec))).parseExpression() match {
+      case Right(ast) =>
+        assert(ast == LetInExpression(List(
+          OperatorDefinition(
+            NonFixLHS(Identifier("IsEven"), List(Identifier("x"))),
+            BinaryExpression(
+              "=",
+              BinaryExpression("%", Identifier("x"), Literal(2)),
+              Literal(0)
+            )
+          )),
+          IdentifierApplication(Identifier("IsEven"), List(Literal(5)))
+        ))
+      case Left(value) => fail(value)
+    }
+  }
+
+  test("Parses LET-IN expressions (2)") {
+    val inputSpec =
+      """LET IsEven(x) == x % 2 = 0
+        |    Five == 5
+        |IN  IsEven(Five) """.stripMargin
+    new Parser(Tokenizer(Scanner(inputSpec))).parseExpression() match {
+      case Right(ast) =>
+        assert(ast == LetInExpression(List(
+          OperatorDefinition(
+            NonFixLHS(Identifier("IsEven"), List(Identifier("x"))),
+            BinaryExpression(
+              "=",
+              BinaryExpression("%", Identifier("x"), Literal(2)),
+              Literal(0)
+            )
+          ),
+          OperatorDefinition(NonFixLHS(Identifier("Five"), Nil), Literal(5))
+        ),
+          IdentifierApplication(Identifier("IsEven"), List(Identifier("Five")))
+        ))
+      case Left(value) => fail(value)
+    }
+  }
+
   test("Parses conjunction lists (1)") {
     val inputSpec =
       """/\ x = 11

@@ -234,6 +234,12 @@ case class CaseExpression(caseArms: List[CaseArm], defaultExpression: Option[Exp
  */
 case class CaseArm(lhs: Expression, rhs: Expression) extends AST
 /**
+ * TLA+ LET-IN expression.
+ *
+ * LetInExpression := 'LET' [OperatorDefinition | FunctionDefinition | ModuleDefinition]+ 'IN' Expression
+ */
+case class LetInExpression(definitions: List[OperatorDefinition | FunctionDefinition | ModuleDefinition], expression: Expression) extends Expression
+/**
  * TLA+ CHOOSE expression.
  */
 case class ChooseExpression(variable: Identifier | IdentifierTuple, domain: Expression, predicate: Expression) extends Expression
@@ -1458,6 +1464,8 @@ class Parser(lexer: Tokenizer) {
       then for _ <- consume(TokenKind.AT) yield AtSign()
     else if check(TokenKind.CASE)
       then for caseExpr <- parseCaseExpression() yield caseExpr
+    else if check(TokenKind.LET)
+      then for letInExpr <- parseLetInExpression() yield letInExpr
     else if check(TokenKind.AND)
       then for conjunctionList <- parseConjunctionList() yield conjunctionList
     else if check(TokenKind.OR)
@@ -2100,7 +2108,7 @@ class Parser(lexer: Tokenizer) {
     } yield IfThenElse(cond, thenExpr, elseExpr)
 
   /**
-   * Parse an CASE expression.
+   * Parse a CASE expression.
    *
    * CaseExpression := 'CASE' CaseArm [ '[]' CaseArm ]* [ '[]' 'OTHER' '->' Expression ]
    */
@@ -2143,6 +2151,46 @@ class Parser(lexer: Tokenizer) {
       }
     }
     Right(caseArms.toList)
+  }
+
+  /**
+   * Parse a TLA+ LET-IN expression.
+   *
+   * LetInExpression := 'LET' [OperatorDefinition | FunctionDefinition | ModuleDefinition]+ 'IN' Expression
+   */
+  private def parseLetInExpression(): Either[String, LetInExpression] = {
+    for {
+      _ <- consume(TokenKind.LET)
+      definitions <- parseLetInDefinitions()
+      _ <- consume(TokenKind.IN)
+      expression <- parseExpression()
+    } yield LetInExpression(definitions, expression)
+  }
+
+  /**
+   * Parse a sequence of one or more 'LET' definitions. We stop parsing when we encounter the 'IN' token.
+   */
+  def parseLetInDefinitions(): Either[String, List[OperatorDefinition | FunctionDefinition | ModuleDefinition]] = {
+    val definitions = new ListBuffer[OperatorDefinition | FunctionDefinition | ModuleDefinition]
+    // We perform a do-while loop in order to parse at least one definition.
+    while {
+      (for definition <- parseDefinition() yield definition) match {
+        case Right(value) => value match {
+          case operatorDef: OperatorDefinition => definitions addOne operatorDef
+          case functionDef: FunctionDefinition => definitions addOne functionDef
+          case moduleDef: ModuleDefinition => definitions addOne moduleDef
+          case instance: Instance => return Left("Definition expected.")
+        }
+        case Left(value) => return Left(value)
+      }
+      // Continue with the loop, until we see the 'IN' token
+      lexer.peek() match {
+        case Token(TokenKind.IN, _, _, _) => false
+        case _ => true
+      }
+    }
+    do ()
+    Right(definitions.toList)
   }
 
   /**
