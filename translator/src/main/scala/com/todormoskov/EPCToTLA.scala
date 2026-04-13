@@ -117,7 +117,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     // which appear in the memory of a location or are declared with the 'var' keyword.
     // Additionally, we create a variable for the program counters (pc) of the different locations
     // and their threads. Finally, we create variables for each channel, with the same name as the channel.
-    val TIOption = Option.when(epcCtx.weakAccuracyConfigured) (TI)
+    val TIOption = Option.when(epcCtx.unreliableFailureDetection) (TI)
     val FOption = Option.when(epcCtx.failStopConfigured) (F)
     val AEOption = Option.when(declaredChannels.nonEmpty)(AE)
     val OOption = Option.when(epcCtx.specWithMultiSends)(O)
@@ -176,14 +176,23 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       tlaStringBuilder.appendNewline()
     )
 
-    // Generate the suspectOK predicate when WeakAccuracy is configured
+    // Generate the suspectOK predicate when "WeakAccuracy" is configured
     val suspectOKOnWeakAccuracy = Option.when(epcCtx.weakAccuracyConfigured)(
       OperatorDefinition(
-        NonFixLHS(suspectOK, List(currentTI, currentF, suspected, suspector)),
-        BinaryExpression("/\\", BinaryExpression("#", currentTI, emptySet), BinaryExpression("\\notin", suspected, currentTI))
+        NonFixLHS(suspectOK, List(ti, f, suspected, suspector)),
+        BinaryExpression("/\\", BinaryExpression("#", ti, emptySet), BinaryExpression("\\notin", suspected, ti))
       )
     )
     suspectOKOnWeakAccuracy.foreach(suspectOKDefinition =>
+      tlaStringBuilder.appendUnit(suspectOKDefinition)
+      tlaStringBuilder.appendNewline()
+    )
+
+    // Generate the suspectOK predicate when "EventualWeakAccuracy" is configured
+    val suspectOKOnEventualWeakAccuracy = Option.when(epcCtx.eventualWeakAccuracyConfigured)(
+      OperatorDefinition(NonFixLHS(suspectOK, List(ti, f, suspected, suspector)), BinaryExpression("\\notin", suspected, ti))
+    )
+    suspectOKOnEventualWeakAccuracy.foreach(suspectOKDefinition =>
       tlaStringBuilder.appendUnit(suspectOKDefinition)
       tlaStringBuilder.appendNewline()
     )
@@ -221,7 +230,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
    */
   private def generateInitStatePredicate(): Unit = {
     // TI is variable that contains the "Trusted Immortal" locations and is used when then WeakAccuracy modifier is configured.
-    val TIInitialValue = Option.when(epcCtx.weakAccuracyConfigured)(BinaryExpression("=", TI, emptySet))
+    val TIInitialValue = Option.when(epcCtx.unreliableFailureDetection)(BinaryExpression("=", TI, emptySet))
 
     // F is a variable that contains failed processes and is used only when the FailStop modifier is configured.
     val FInitialValue = Option.when(epcCtx.failStopConfigured)(BinaryExpression("=", F, emptySet))
@@ -569,7 +578,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     val lowerCaseTI = getUniqueIdentifier(ti)
     val lowerCaseF = getUniqueIdentifier(f)
     // "Env" operator when only fail-stop is configured
-    val envOnFailStop = Option.when (epcCtx.failStopConfigured && !epcCtx.weakAccuracyConfigured) (OperatorDefinition(
+    val envOnFailStop = Option.when (epcCtx.failStopConfigured && !epcCtx.unreliableFailureDetection) (OperatorDefinition(
       NonFixLHS(Env, Nil),
       // \E f \in SUBSET (ProcSet \ F):
       //    /\ failOK(F, f)
@@ -590,7 +599,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     )
 
     // "Env" operator when fail-stop and (eventual) weak accuracy are configured
-    val envOption = Option.when(epcCtx.failStopConfigured && epcCtx.weakAccuracyConfigured)(OperatorDefinition(
+    val envOption = Option.when(epcCtx.failStopConfigured && epcCtx.unreliableFailureDetection)(OperatorDefinition(
       NonFixLHS(Env, Nil),
       // \E ti, f \in SUBSET (ProcSet \ (TI \cup F)):
       //    /\ ti \cap f # {}
@@ -707,7 +716,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         operatorDefinition.signature.arguments.asInstanceOf[List[Identifier]]
       )
     ) match {
-      case Nil => ???
+      case Nil => ??? // as long as the function is called with a non-empty list of operator definitions, it should be okay
       case head :: Nil => head
       case list: List[IdentifierApplication] => DisjunctionList(list)
     }
@@ -1250,7 +1259,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     // E.g. <location-expression> \in ProcSet
     val sourceIsInProcSet = BinaryExpression("\\in", sourceExpr, ProcSet)
     // We require that the suspectOK-predicate is satisfied
-    val suspectOKOptionOnWeakAccuracy = Option.when(epcCtx.weakAccuracyConfigured)(
+    val suspectOKOptionOnWeakAccuracy = Option.when(epcCtx.unreliableFailureDetection)(
       IdentifierApplication(suspectOK, List(TI, F, sourceExpr, self))
     )
     // We update the D component of the executing location
@@ -1314,12 +1323,12 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         // The changes will include a change in the channel based on a case distinction for the different indices:
         // - AE' = CASE i = 1 -> [AE EXCEPT ![c] = AE[c] (+) SetToBag({ << self, 2, "Hello" >> })]
         //         []   i = 2 -> [AE EXCEPT ![c] = AE[c] (+) SetToBag({ << self, 2, "Hello" >> })]
-        // an update of the O variable to include the index i, which is being send with the current action.
+        // an update of the O variable to include the index i, which is being sent with the current action.
         // Importantly, once we have sent all message, we need to reset O to the empty set, in order to "clean it up".
         // - O' = [O EXCEPT ![self][thd] = IF @ \cup { i } # 1..2
         //                                    THEN @ \cup { i }
         //                                    ELSE {} ]
-        // And finally, we need to update the pc in two ways: it stays the same if there are still messages to be send,
+        // And finally, we need to update the pc in two ways: it stays the same if there are still messages to be sent,
         // or it moves to the next command if all messages were already sent (we recognize this using O')
         // - pc' = [pc EXCEPT ![self][thd] = IF O[self][thd] \cup { i } # 1..2
         //                                    THEN @
@@ -1939,7 +1948,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
    * and we return it.
    */
   private def getUniqueIdentifier(identifier: Identifier): Identifier = {
-    var idx = 0;
+    var idx = 0
     var tempIdentifier = identifier
     // We check if we have already seen this identifier.
     // If yes, we increment the counter and check for the next one.

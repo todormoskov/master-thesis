@@ -37,6 +37,8 @@ case class EPCSpecContext(
 ) {
   val failStopConfigured: Boolean = modifiers.contains("FailStop")
   val weakAccuracyConfigured: Boolean = modifiers.contains("WeakAccuracy")
+  val eventualWeakAccuracyConfigured: Boolean = modifiers.contains("EventualWeakAccuracy")
+  val unreliableFailureDetection: Boolean = weakAccuracyConfigured || eventualWeakAccuracyConfigured
   val terminatingConfigured: Boolean = modifiers.contains("Terminating")
   val terminationConfigured: Boolean = modifiers.contains("Termination")
   val nextWFConfigured: Boolean = modifiers.contains("NextWF")
