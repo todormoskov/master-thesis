@@ -130,8 +130,9 @@ object Lexer {
     CIRCLE,
     OPLUS,
     OMINUS,
+    INT_DIV,
     SQSUBSETEQ,
-    COLON_LT,
+    COLON_GT,
 
     EPC_CONTEXT_OPEN,
     EPC_CONTEXT_CLOSE,
@@ -340,7 +341,7 @@ object Lexer {
           scanner.consume()
           if (scanner.peek().isDefined && scanner.peek().get == '>') {
             scanner.consume()
-            return Token(TokenKind.COLON_LT, ":>", lineNum, col)
+            return Token(TokenKind.COLON_GT, ":>", lineNum, col)
           }
           if (scanner.peek().isDefined && scanner.peek().get == '=') {
             scanner.consume()
@@ -617,6 +618,7 @@ object Lexer {
             case "\\circ" => Token(TokenKind.CIRCLE, name, lineNum, col)
             case "\\oplus" => Token(TokenKind.OPLUS, name, lineNum, col)
             case "\\ominus" => Token(TokenKind.OMINUS, name, lineNum, col)
+            case "\\div" => Token(TokenKind.INT_DIV, name, lineNum, col)
             case "\\sqsubseteq" => Token(TokenKind.SQSUBSETEQ, name, lineNum, col)
             case default => Token(TokenKind.BACKSLASH_OPERATOR, name, lineNum, col)
           }

@@ -1110,10 +1110,10 @@ class Parser(lexer: Tokenizer) {
     }
 
   /**
-   * Set with the token kinds '=', '/=', '<', '<=', '>', '>=', '\in', '\notin' and '\subset'.
+   * Set with the token kinds '=', '/=', '<', '<=', '>', '>=', '\in', '\notin', '\subset' and '\sqsubseteq'.
    */
   private val relationalTokens = Set(TokenKind.EQ, TokenKind.NEQ, TokenKind.LT, TokenKind.LE, TokenKind.GT, TokenKind.GE,
-    TokenKind.SET_IN, TokenKind.NOTIN, TokenKind.SUBSET)
+    TokenKind.SET_IN, TokenKind.NOTIN, TokenKind.SUBSET, TokenKind.SQSUBSETEQ)
 
   /**
    * Parse an equality / relational / membership operator.
@@ -1124,13 +1124,13 @@ class Parser(lexer: Tokenizer) {
    * @return
    */
   private def parseRelationalOperators(): Either[String, Expression] = for {
-    expression <- parseSubsetOrUnionExpression()
+    expression <- parseFunctionMergeExpression()
     finalResult <- {
       def loop(lhs: Expression): Either[String, Expression] =
         lexer.peek() match {
           case Token(kind, value, _, _) if relationalTokens contains kind => for {
             _ <- consume(kind)
-            rhs <- parseSubsetOrUnionExpression()
+            rhs <- parseFunctionMergeExpression()
             intermediateResult <- loop(BinaryExpression(value, lhs, rhs))
           } yield intermediateResult
           case _ => Right(lhs)
@@ -1139,6 +1139,47 @@ class Parser(lexer: Tokenizer) {
       loop(expression)
     }
   } yield finalResult
+
+  /**
+   * Parse a TLA+ "function merge" expression (left-associatively).
+   * The '@@' operator (from the TLC module) has precedence range 6-6.
+   *
+   * @return
+   */
+  private def parseFunctionMergeExpression(): Either[String, Expression] = for {
+    expression <- parseMapToExpression()
+    finalResult <- {
+      def loop(lhs: Expression): Either[String, Expression] = {
+        if check(TokenKind.AT_AT) then for {
+          token <- consume(TokenKind.AT_AT)
+          rhs <- parseMapToExpression()
+          intermediateResult <- loop(BinaryExpression(token.value, lhs, rhs))
+        } yield intermediateResult
+        else Right(lhs)
+      }
+      loop(expression)
+    }
+  } yield finalResult
+
+  /**
+   * Parse map-to expressions.
+   * The ':>' operator form the TLC module has precedence range 7-7.
+   * (From the TLC module: a :> b == [x \in {a} |-> b])
+   *
+   * MapToExpression := Expression ':>' Expression
+   *
+   * @return
+   */
+  private def parseMapToExpression(): Either[String, Expression] = {
+    for {
+      lhs <- parseSubsetOrUnionExpression()
+      result <- if check(TokenKind.COLON_GT) then for {
+        token <- consume(TokenKind.COLON_GT)
+        rhs <- parseSubsetOrUnionExpression()
+      } yield BinaryExpression(token.value, lhs, rhs)
+      else Right(lhs)
+    } yield result
+  }
 
   /**
    * Parse the SUBSET and UNION prefix operators.
@@ -1229,21 +1270,63 @@ class Parser(lexer: Tokenizer) {
 
   /**
    * Parse an additive expression (left-associatively).
-   * The plus operator has precedence range 10-10.
-   * The minus operator has precedence range 11-11.
-   * However, here there are implemented in the same function
-   * (which means that the bind equally strong).
+   * The '+' | '\oplus' | '(+)' operators have precedence range 10-10.
    *
    * @return
    */
   private def parseAdditiveExpression(): Either[String, Expression] = for {
+    expression <- parseModuloExpression()
+    finalResult <- {
+      def loop(lhs: Expression): Either[String, Expression] = {
+        if check(TokenKind.OPLUS) then for {
+          token <- consume(TokenKind.OPLUS)
+          rhs <- parseModuloExpression()
+          intermediateResult <- loop(BinaryExpression(token.value, lhs, rhs))
+        } yield intermediateResult
+        else if check(TokenKind.PLUS) then for {
+          _ <- consume(TokenKind.PLUS)
+          rhs <- parseModuloExpression()
+          intermediateResult <- loop(BinaryExpression("+", lhs, rhs))
+        } yield intermediateResult
+        else Right(lhs)
+      }
+      loop(expression)
+    }
+  } yield finalResult
+
+  /**
+   * Parse modulo expressions.
+   * The modulo operator % has precedence range 10-11.
+   *
+   * ModuloExpression := Expression '%' Expression
+   *
+   * @return
+   */
+  private def parseModuloExpression(): Either[String, Expression] = {
+    for {
+      lhs <- parseSubtractionExpression()
+      result <- if check(TokenKind.MOD) then for {
+        token <- consume(TokenKind.MOD)
+        rhs <- parseSubtractionExpression()
+      } yield BinaryExpression(token.value, lhs, rhs)
+      else Right(lhs)
+    } yield result
+  }
+
+  /**
+   * Parse a subtraction expression (left-associatively).
+   * The '-' | '\ominus' | '(-)' operators have precedence range 11-11.
+   *
+   * @return
+   */
+  private def parseSubtractionExpression(): Either[String, Expression] = for {
     expression <- parseMultiplicativeExpression()
     finalResult <- {
       def loop(lhs: Expression): Either[String, Expression] = {
-        if check(TokenKind.PLUS) then for {
-          _ <- consume(TokenKind.PLUS)
+        if check(TokenKind.OMINUS) then for {
+          token <- consume(TokenKind.OMINUS)
           rhs <- parseMultiplicativeExpression()
-          intermediateResult <- loop(BinaryExpression("+", lhs, rhs))
+          intermediateResult <- loop(BinaryExpression(token.value, lhs, rhs))
         } yield intermediateResult
         else if check(TokenKind.MINUS) then for {
           _ <- consume(TokenKind.MINUS)
@@ -1257,24 +1340,24 @@ class Parser(lexer: Tokenizer) {
   } yield finalResult
 
   /**
-   * Set with the token kinds '*', '/', '%', '\X', '\times'
+   * Set with the token kinds '*', '\X', '\times', '\o', '\circ'
    */
-  private val multiplicativeTokens = Set(TokenKind.MUL, TokenKind.DIV, TokenKind.MOD, TokenKind.TIMES)
+  private val multiplicativeTokens = Set(TokenKind.MUL, TokenKind.TIMES, TokenKind.CIRCLE)
 
   /**
-   * Parse a multiplication expression (left-associatively).
-   * The *, /, %, \X operators have precedence range 13-13 and are left-associative.
+   * Parse a multiplicative expression (left-associatively).
+   * The *, \X, \o operators have precedence range 13-13 and are left-associative.
    *
    * @return
    */
   private def parseMultiplicativeExpression(): Either[String, Expression] = for {
-    expression <- parseUnaryMinusExpression()
+    expression <- parseDivisionExpression()
     finalResult <- {
       def loop(lhs: Expression): Either[String, Expression] =
         lexer.peek() match {
           case Token(kind, value, _, _) if multiplicativeTokens contains kind => for {
             _ <- consume(kind)
-            rhs <- parseUnaryMinusExpression()
+            rhs <- parseDivisionExpression()
             intermediateResult <- loop(BinaryExpression(value, lhs, rhs))
           } yield intermediateResult
           case _ => Right(lhs)
@@ -1284,18 +1367,43 @@ class Parser(lexer: Tokenizer) {
   } yield finalResult
 
   /**
+   * Parse division expressions.
+   * The division operators '/' and '\div' have precedence range 13-13.
+   *
+   * DivisionExpression := Expression ['/' | '\div'] Expression
+   *
+   * @return
+   */
+  private def parseDivisionExpression(): Either[String, Expression] = {
+    for {
+      lhs <- parseUnaryMinusExpression()
+      result <- if check(TokenKind.DIV) then for {
+        token <- consume(TokenKind.DIV)
+        rhs <- parseUnaryMinusExpression()
+      } yield BinaryExpression(token.value, lhs, rhs)
+      else if check(TokenKind.INT_DIV) then for {
+        token <- consume(TokenKind.INT_DIV)
+        rhs <- parseUnaryMinusExpression()
+      } yield BinaryExpression(token.value, lhs, rhs)
+      else Right(lhs)
+    } yield result
+  }
+
+  /**
    * Parse a unary minus expression.
    * The unary minus operator has precedence range 12-12.
    *
    * @return
    */
   private def parseUnaryMinusExpression(): Either[String, Expression] =
-    for expression <- if check(TokenKind.MINUS)
-    then for {
-        _ <- consume(TokenKind.MINUS)
-        innerExpression <- parseUnaryMinusExpression()
-      } yield UnaryExpression("-", innerExpression)
-    else parseExponentiation()
+    for {
+      expression <- if check(TokenKind.MINUS)
+      then for {
+          _ <- consume(TokenKind.MINUS)
+          innerExpression <- parseUnaryMinusExpression()
+        } yield UnaryExpression("-", innerExpression)
+      else parseExponentiation()
+    }
     yield expression
 
   /**

@@ -930,7 +930,7 @@ class LexerTest extends AnyFunSuite {
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.COLON_LT, ":>", 1, 1),
+        Token(TokenKind.COLON_GT, ":>", 1, 1),
         Token(TokenKind.EOF, null, 1, 3)
       )
     )
