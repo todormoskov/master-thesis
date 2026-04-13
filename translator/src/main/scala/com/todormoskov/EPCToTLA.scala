@@ -248,7 +248,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     // It has the following initial value: [self \in ProcSet |-> [_suspchan \in SuspChanSet |-> [p \in ProcSet |-> TRUE]]]
     val DInitialValue = Option.when(epcCtx.suspiciousChannels.nonEmpty)
       (BinaryExpression("=", D, BoundedMapping(List(selfInProcSet), BoundedMapping(List(suspchanInSuspChanSet),
-        BoundedMapping(List(QuantifierBound(Identifier("p"), ProcSet)), Literal(true))
+        BoundedMapping(List(QuantifierBound(Identifier("_p"), ProcSet)), Literal(true))
       ))))
 
     // pc is a variable holds the program counters of all (location, thread)-pairs
