@@ -95,6 +95,23 @@ class TLAStringBuilder {
     appendExpression(body)
   }
 
+  def append(functionDefinition: FunctionDefinition): Unit = {
+    val FunctionDefinition(identifier, arguments, body) = functionDefinition
+    appendExpression(identifier)
+    arguments match {
+      case Nil =>
+      case _ =>
+        appendString("[")
+        arguments.zipWithIndex.foreach((arg, idx) => {
+          appendExpression(arg)
+          if (idx != arguments.length - 1) appendString(", ")
+        })
+        appendString("]")
+    }
+    appendString(" == ")
+    appendExpression(body)
+  }
+
   def appendExpression(expression: Expression): Unit = {
     expression match {
       case Literal(value) =>
@@ -206,15 +223,21 @@ class TLAStringBuilder {
         appendString("LET ")
         val definitionsIndentation = column - 1
         definitions.zipWithIndex.foreach((definition, idx) => {
-          // Currently, we don't handle function and module definitions
-          val operatorDef = definition.asInstanceOf[OperatorDefinition]
           if (idx == 0) {
-            append(operatorDef)
+            definition match {
+              case operatorDef: OperatorDefinition => append(operatorDef)
+              case functionDef: FunctionDefinition => append(functionDef)
+              case _ => // We don't handle module definitions
+            }
           }
           else {
             appendNewline()
             appendString(" ".repeat(definitionsIndentation))
-            append(operatorDef)
+            definition match {
+              case operatorDef: OperatorDefinition => append(operatorDef)
+              case functionDef: FunctionDefinition => append(functionDef)
+              case _ => // We don't handle module definitions
+            }
           }
         })
         appendNewline()

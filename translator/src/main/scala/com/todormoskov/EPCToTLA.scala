@@ -1614,7 +1614,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
 
   /**
    * General rewrite, which allows to rewrite different AST nodes of a TLA+ expression with an input "rewrite function".
-   * The method iterates recursively over an AST and rewrites each node using the rewrite funciton.
+   * The method iterates recursively over an AST and rewrites each node using the function rewriteFn.
    */
   private def rewrite(expression: Expression, rewriteFn: Expression => Expression): Expression = {
     expression match {
@@ -1664,6 +1664,9 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       // This means that each rewrite function should rewrite these EXCEPT expressions,
       // in order to prevent endless recursion, leading to stack overflows!
       case exceptExpr: ExceptExpression => rewriteFn(exceptExpr)
+      // LET-IN Expressions are also rewritten as a whole!
+      // ==> rewriteFn should rewrite these expressions and not simply call rewrite on LET-IN expressions.
+      case letInExpr: LetInExpression => rewriteFn(letInExpr)
       // The following expressions are simply returned unchanged
       case genIdentifier: GeneralIdentifier => genIdentifier
       case ws: WeakStuttering => ws
@@ -1698,6 +1701,22 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
             }),
             rewrite(clause.value, memoizedRewrite)
           )))
+        case letInExpr@LetInExpression(definitions, expression) =>
+          // We rewrite the access to location variables in the bodies of the definitions and the main expression.
+          // E.g. for a location variable x, we change "x" to "x[self]" in all expressions.
+          // If a definition "redefines" a location variable, we simply skip it and leave
+          // TLA+ to show an error in the generated translation.
+          val updatedDefinitions: List[OperatorDefinition | FunctionDefinition | ModuleDefinition] = definitions.map {
+            case operatorDef@OperatorDefinition(_, body) =>
+              operatorDef.copy(body = rewrite(body, memoizedRewrite))
+            case functionDef@FunctionDefinition(_, _, body) =>
+              functionDef.copy(body = rewrite(body, memoizedRewrite))
+            case moduleDef@ModuleDefinition(_, _) =>
+              // We leave this case unchanges since it makes no sense for EPC specifications.
+              moduleDef
+          }
+          val updatedExpression = rewrite(expression, memoizedRewrite)
+          LetInExpression(updatedDefinitions, updatedExpression)
         case _ => rewrite(expression, memoizedRewrite)
       }
     }
@@ -1710,7 +1729,8 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
    */
   private def renameBV(from: Identifier, to: Identifier, target: Identifier | List[Identifier] | IdentifierTuple): Identifier | List[Identifier] | IdentifierTuple = {
     target match {
-      case identifier: Identifier => to
+      case identifier: Identifier if identifier == from => to
+      case identifier: Identifier => identifier
       case identifiers: List[Identifier] => identifiers.map(renameBV(from, to, _).asInstanceOf[Identifier])
       case tuple: IdentifierTuple => IdentifierTuple(tuple.identifiers.map(renameBV(from, to, _).asInstanceOf[Identifier]))
     }
@@ -1766,7 +1786,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           defaultExpression.map(renameBV(from, to, _, depth)))
       case ChooseExpression(identifier, domain, predicate) if bv(identifier).contains(from) && depth > 0 =>
         ChooseExpression(
-          to,
+          renameBV(from, to, identifier).asInstanceOf[Identifier | IdentifierTuple],
           domain,
           renameBV(from, to, predicate, depth - 1)
         )
@@ -1850,9 +1870,9 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         )
       case SetOfAllFunctions(domain, codomain) => SetOfAllFunctions(renameBV(from, to, domain, depth), renameBV(from, to, codomain, depth))
       case SetOfAllRecords(mappings) => SetOfAllRecords(mappings.map(renameBV(from, to, _, depth).asInstanceOf[Mapping]))
-      case ExceptExpression(exceptTarter, clauses) =>
+      case ExceptExpression(exceptTarget, clauses) =>
         ExceptExpression(
-          renameBV(from, to, exceptTarter, depth),
+          renameBV(from, to, exceptTarget, depth),
           clauses.map(clause => ExceptClause(
             SelectorPath(clause.selector.parts.map {
               case dotSelector: DotSelector => dotSelector
@@ -1860,6 +1880,26 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
             }),
             renameBV(from, to, clause.value, depth)
         )))
+      case LetInExpression(definitions, expression) =>
+        // All occurrences of the "form" identifier are renamed to the "to" identifier in the body of definition
+        // if the "from" identifier does not occur as a parameter in the definition.
+        val updatedDefinitions: List[OperatorDefinition | FunctionDefinition | ModuleDefinition] = definitions.map {
+          case operatorDef@OperatorDefinition(NonFixLHS(identifier, arguments), body) if arguments.exists {
+              case identifier: Identifier if identifier == from => true
+              case OperatorDeclaration(operator, _) if operator == from => true
+              case _ => false
+            } => operatorDef
+          case operatorDef@OperatorDefinition(NonFixLHS(identifier, arguments), body) =>
+            operatorDef.copy(body = renameBV(from, to, body, depth))
+          case functionDef@FunctionDefinition(identifier, arguments, body) if bv(arguments) contains from =>
+            functionDef
+          case functionDef@FunctionDefinition(identifier, arguments, body) =>
+            functionDef.copy(body = renameBV(from, to, body, depth))
+          case moduleDef: ModuleDefinition => moduleDef
+        }
+        // All occurrences of the "from" identifier in the expression are renamed to the "to" identifier
+        val renamedExpr = renameBV(from, to, expression, depth)
+        LetInExpression(updatedDefinitions, renamedExpr)
       // The following expressions are simply returned unchanged
       case genIdentifier: GeneralIdentifier => genIdentifier
       case ws: WeakStuttering => ws
