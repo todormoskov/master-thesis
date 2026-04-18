@@ -4,13 +4,24 @@ EXTENDS Integers, Sequences, Bags
 CONSTANT input
 N == Len(input)
 
-cdr(r) == r % N = 0
+cdr(r) == ((r - 1) % N) + 1
 
-\* TODO: DUMMY DEFINITION
-best(props) == -1
+Seconds(S) == { p[2] : p \in S }
 
-\* TODO: DUMMY DEFINITION
-majority(acks) == FALSE
+SetMax(S) ==  CHOOSE i \in S : \A j \in S : i >= j
+
+best(props) == LET domain == DOMAIN props
+                   maxStamp == SetMax(Seconds(domain))
+                   somebodyWithMaxStamp == CHOOSE bst \in domain : bst[2] = maxStamp
+               IN  somebodyWithMaxStamp[1]
+
+CeilDiv(a, b) == a \div b + IF a % b = 0 THEN 0 ELSE 1
+
+Majority == CeilDiv(N + 1, 2)
+
+PositiveMajority(acks) == acks[TRUE] >= Majority 
+
+failOK(failed, failCandidates) == Cardinality(failed \union failCandidates) <= 1
 
 (* --EPC (FailStop, EventualWeakAccuracy, Terminating, Termination, NextWF)
          ConsensusWithDiamondS
@@ -25,8 +36,8 @@ suspchan learn
      output |-> Initialized,
      p |-> Initialized,
      a |-> Initialized,
-     Props |-> {},
-     Acks |-> {}]
+     Props |-> EmptyBag,
+     Acks |-> EmptyBag]
      <|
        (t1 = 1) (  cp_init: Coll_p() )
      | (t2 = 2) (  ca_init: Coll_a() )
@@ -36,12 +47,12 @@ suspchan learn
 
 def Coll_p(p, Props) =
    propRcv: (k \in 1..N) prop@k?(p);
-  upd_prop: << Props := {p} \union Props >>;
+  upd_prop: << Props := SetToBag({p}) (+) Props >>;
    cp_loop: Coll_p()
 
 def Coll_a(a, Acks) =
    ackRcv: (k \in 1..N) ack@k?(a);
- upd_acks: << Acks := {a} \union Acks >>;
+ upd_acks: << Acks := SetToBag({a}) (+) Acks >>;
   ca_loop: Coll_a()
 
 def P1(d, r, v) =
@@ -53,35 +64,34 @@ def P1(d, r, v) =
 
 def P2(r, Props) =
      crd2: if self = cdr(r)
-     then propsRcv:
-          if Cardinality(Props) < (N + 1) \div 2
-            then p2_2: P2()
-            else bestSnd: {{ (k \in 1..N) learn @ k << best(Props) >> }};
-                    p3_c: P3()
-          fi
-     else p3_p: P3() fi
+             then propsRcv: if BagCardinality(Props) < Majority
+                              then    p2_2: P2()
+                              else bestSnd: {{ (k \in 1..N) learn @ k << best(Props) >> }};
+                                      p3_c: P3()
+                            fi
+             else     p3_p: P3() 
+           fi
 
 def P3(r, v, s) =
  learnRcv: learn@cdr(r)?(v);
   trusted: if D[learn][cdr(r)]
-             then  ackSnd: {{ ack @ cdr(r) << TRUE  >> }}; stamp: << s := r >>
+             then  ackSnd: {{ ack @ cdr(r) << TRUE  >> }}; 
+                    stamp: << s := r >>
              else nackSnd: {{ ack @ cdr(r) << FALSE >> }}
            fi;
   p4_init: P4()
 
 def P4(r, Acks, output, v) =
      crd4: if self = cdr(r)
-             then acksRcv:
-                  if Cardinality(Acks) < (N + 1) \div 2
-                    then p4_loop: P4()
-                    else enough:
-                         if majority(Acks)
-                           then  out: << output := v >>;
-                              spread: {{ (k \in 1..N) decide @ k << v >> }}
-                           else p1_c: P1()
-                         fi
-                  fi
-               else p1_p: P1()
+             then acksRcv: if BagCardinality(Acks) < Majority
+                             then p4_loop: P4()
+                             else  enough: if PositiveMajority(Acks)
+                                             then  out: << output := v >>;
+                                                spread: {{ (k \in 1..N) decide @ k << v >> }}
+                                             else p1_c: P1()
+                                           fi
+                           fi
+               else  p1_p: P1()
            fi
 
 def Dec(output, d) =
@@ -134,9 +144,9 @@ Init == /\ TI = {}
                                      [] OTHER -> Undefined]
         /\ a = [self \in ProcSet |-> CASE self \in 1..N -> Initialized
                                      [] OTHER -> Undefined]
-        /\ Props = [self \in ProcSet |-> CASE self \in 1..N -> {}
+        /\ Props = [self \in ProcSet |-> CASE self \in 1..N -> EmptyBag
                                          [] OTHER -> Undefined]
-        /\ Acks = [self \in ProcSet |-> CASE self \in 1..N -> {}
+        /\ Acks = [self \in ProcSet |-> CASE self \in 1..N -> EmptyBag
                                         [] OTHER -> Undefined]
 
 \* Location l \in 1..N, thread t1 = 1
@@ -222,7 +232,7 @@ propRcvSusp(self, thd) == /\ pc[self][thd] = "propRcv"
 
 upd_prop(self, thd) == /\ pc[self][thd] = "upd_prop"
                        /\ Props[self] # Undefined
-                       /\ Props' = [Props EXCEPT ![self] = {p[self]} \union Props[self]]
+                       /\ Props' = [Props EXCEPT ![self] = SetToBag({p[self]}) (+) Props[self]]
                        /\ pc' = [pc EXCEPT ![self][thd] = "cp_loop"]
                        /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Acks>>
 
@@ -279,7 +289,7 @@ ackRcvSusp(self, thd) == /\ pc[self][thd] = "ackRcv"
 
 upd_acks(self, thd) == /\ pc[self][thd] = "upd_acks"
                        /\ Acks[self] # Undefined
-                       /\ Acks' = [Acks EXCEPT ![self] = {a[self]} \union Acks[self]]
+                       /\ Acks' = [Acks EXCEPT ![self] = SetToBag({a[self]}) (+) Acks[self]]
                        /\ pc' = [pc EXCEPT ![self][thd] = "ca_loop"]
                        /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props>>
 
@@ -352,12 +362,12 @@ crd2F(self, thd) == /\ pc[self][thd] = "crd2"
                     /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
 propsRcvT(self, thd) == /\ pc[self][thd] = "propsRcv"
-                        /\ Cardinality(Props[self]) < (N + 1) \div 2
+                        /\ BagCardinality(Props[self]) < Majority
                         /\ pc' = [pc EXCEPT ![self][thd] = "p2_2"]
                         /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
 propsRcvF(self, thd) == /\ pc[self][thd] = "propsRcv"
-                        /\ ~(Cardinality(Props[self]) < (N + 1) \div 2)
+                        /\ ~(BagCardinality(Props[self]) < Majority)
                         /\ pc' = [pc EXCEPT ![self][thd] = "bestSnd"]
                         /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
@@ -501,12 +511,12 @@ crd4F(self, thd) == /\ pc[self][thd] = "crd4"
                     /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
 acksRcvT(self, thd) == /\ pc[self][thd] = "acksRcv"
-                       /\ Cardinality(Acks[self]) < (N + 1) \div 2
+                       /\ BagCardinality(Acks[self]) < Majority
                        /\ pc' = [pc EXCEPT ![self][thd] = "p4_loop"]
                        /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
 acksRcvF(self, thd) == /\ pc[self][thd] = "acksRcv"
-                       /\ ~(Cardinality(Acks[self]) < (N + 1) \div 2)
+                       /\ ~(BagCardinality(Acks[self]) < Majority)
                        /\ pc' = [pc EXCEPT ![self][thd] = "enough"]
                        /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
@@ -519,12 +529,12 @@ p4_loop(self, thd) == /\ pc[self][thd] = "p4_loop"
                       /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
 enoughT(self, thd) == /\ pc[self][thd] = "enough"
-                      /\ majority(Acks[self])
+                      /\ PositiveMajority(Acks[self])
                       /\ pc' = [pc EXCEPT ![self][thd] = "out"]
                       /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
 enoughF(self, thd) == /\ pc[self][thd] = "enough"
-                      /\ ~(majority(Acks[self]))
+                      /\ ~(PositiveMajority(Acks[self]))
                       /\ pc' = [pc EXCEPT ![self][thd] = "p1_c"]
                       /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
@@ -654,7 +664,10 @@ Dec == \E self \in ProcSet \ F:
            \/ respread(self, thd)
 
 Env == \E ti, f \in SUBSET (ProcSet \ (TI \cup F)):
+         /\ ti # {}
+         /\ f # {}
          /\ ti \cap f = {}
+         /\ failOK(F, f)
          /\ TI' = TI \cup ti
          /\ F' = F \cup f
          /\ UNCHANGED <<AE, O, D, pc, ra, v, d, r, s, output, p, a, Props, Acks>>
@@ -686,5 +699,5 @@ Termination == <>(\A self \in ProcSet \ F:
 
 =============================================================================
 \* Modification History
-\* Last modified Mon Apr 13 20:06:34 CEST 2026 by todormoskov
+\* Last modified Sat Apr 18 12:18:29 CEST 2026 by todormoskov
 \* Created Tue Feb 03 17:23:17 CET 2026 by todormoskov
