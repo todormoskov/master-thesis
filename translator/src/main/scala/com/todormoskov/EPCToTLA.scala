@@ -87,10 +87,10 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   private val emptySet = ExplicitSet(Nil)
   private val emptyTuple = Tuple(Nil)
   private val SetToBag = Identifier(SET_TO_BAG)
-  private val selfInProcSet = QuantifierBound(self, ProcSet)
-  private val thdInThreadSetSelf = QuantifierBound(thd, FunctionApplication(ThreadSet, List(self)))
-  private val chanInChanSet = QuantifierBound(chan, ChanSet)
-  private val suspchanInSuspChanSet = QuantifierBound(suspchan, SuspChanSet)
+  private val selfInProcSet = BoundedVariableDeclaration(self, ProcSet)
+  private val thdInThreadSetSelf = BoundedVariableDeclaration(thd, FunctionApplication(ThreadSet, List(self)))
+  private val chanInChanSet = BoundedVariableDeclaration(chan, ChanSet)
+  private val suspchanInSuspChanSet = BoundedVariableDeclaration(suspchan, SuspChanSet)
   private val pcThreadValue = ThdLvlFnAppl(pc)
 
   // Helper methods
@@ -248,7 +248,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     // It has the following initial value: [self \in ProcSet |-> [_suspchan \in SuspChanSet |-> [p \in ProcSet |-> TRUE]]]
     val DInitialValue = Option.when(epcCtx.suspiciousChannels.nonEmpty)
       (BinaryExpression("=", D, BoundedMapping(List(selfInProcSet), BoundedMapping(List(suspchanInSuspChanSet),
-        BoundedMapping(List(QuantifierBound(Identifier("_p"), ProcSet)), Literal(true))
+        BoundedMapping(List(BoundedVariableDeclaration(Identifier("_p"), ProcSet)), Literal(true))
       ))))
 
     // pc is a variable holds the program counters of all (location, thread)-pairs
@@ -290,7 +290,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
                 // The expression is the new function. So we have a nested bounded mapping.
                 // The nested bounded mapping have the following form: [thd \in ThreadSet[self] |-> CASE ... ].
                 BoundedMapping(
-                  List(QuantifierBound(thd, FunctionApplication(ThreadSet, List(self)))),
+                  List(BoundedVariableDeclaration(thd, FunctionApplication(ThreadSet, List(self)))),
                   CaseExpression(
                     threadEnums.map(thdEnum => {
                       CaseArm(
@@ -417,28 +417,28 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
    * Creates a TLA+ set for the quantified multiset of travelling messages.
    */
   private def travellingMessagesToTLASet(enumerator: Enumerator, message: TravellingMessage): Either[String, QuantifiedSetComprehension] =
-    // First we turn the enumerator to a quantifier bound. E.g ((j = 1) -> j \in {1}) or ((j \in 1..N) -> j \in 1..N).
-    for (quantifierBound <- enumeratorToQuantifierBound(enumerator))
+    // First we turn the enumerator to a bounded variable declaration. E.g ((j = 1) -> j \in {1}) or ((j \in 1..N) -> j \in 1..N).
+    for (boundedVariableDeclaration <- enumeratorToBoundedVariableDeclaration(enumerator))
       // The travelling message is implemented as a triple << sender, receiver, payload >>.
-      yield QuantifiedSetComprehension( Tuple(List(message.source, message.target, message.value)), List(quantifierBound))
+      yield QuantifiedSetComprehension( Tuple(List(message.source, message.target, message.value)), List(boundedVariableDeclaration))
 
   /**
-   * Translates an EPC enumerator to a TLA+ quantifier bound.
+   * Translates an EPC enumerator to a TLA+ bounded variable declaration.
    * E.g ((j = 1) -> j \in {1}) or ((j \in 1..N) -> j \in 1..N).
    */
-  private def enumeratorToQuantifierBound(enumerator: Enumerator): Either[String, QuantifierBound] = {
+  private def enumeratorToBoundedVariableDeclaration(enumerator: Enumerator): Either[String, BoundedVariableDeclaration] = {
     enumerator match {
       case BoundedEnumerator(name, "=", domain) =>
         // Since the enumerator has the form (j = 1), we turn it into j \in { 1 }.
-        Right(QuantifierBound(name, ExplicitSet(List(domain))))
+        Right(BoundedVariableDeclaration(name, ExplicitSet(List(domain))))
       case BoundedEnumerator(name, "\\in", domain) =>
         // Since the enumerator has the form (j \in 1..N), we keep it as it is.
-        Right(QuantifierBound(name, domain))
+        Right(BoundedVariableDeclaration(name, domain))
       case BoundedEnumeratorWithFilter(name, "=", domain, filter) =>
         // Since the enumerator has the form (j = 1 : j # 1), we turn it into j \in { j \in { 1 } : j # 1 }.
         Right(
           // This is the outer binder j \in { ... }
-          QuantifierBound(name,
+          BoundedVariableDeclaration(name,
             // This is the inner binder j \in { 1 } : j # 1
             // We turn the domain into a set, e.g 1 -> { 1 }.
             // We add the filter to this bounded set comprehension.
@@ -449,7 +449,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         // Since the enumerator has the form (j \in 1..N : j # self), we turn it into j \in { j \in 1..N : j # self }.
         Right(
           // This is the outer binder j \in { ... }
-          QuantifierBound(name,
+          BoundedVariableDeclaration(name,
             // This is the inner binder j \in 1..N : j # self
             // We keep the domain expression as it is, e.g 1..N -> 1..N.
             // We add the filter to this bounded set comprehension.
@@ -585,7 +585,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       //    /\ FailOK(F, f)
       //    /\ F' = F \cup f
       //    /\ UNCHANGED ...
-      BoundedQuantifiedExpression("\\E", List(QuantifierBound(lowerCaseF,
+      BoundedQuantifiedExpression("\\E", List(BoundedVariableDeclaration(lowerCaseF,
         UnaryExpression("SUBSET", ParenthesizedExpression(BinaryExpression("\\", ProcSet, F)))
       )), ConjunctionList(Nil
         ++ Some(BinaryExpression("#", lowerCaseF, emptySet))
@@ -610,7 +610,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       //    /\ TI' = TI \cup ti
       //    /\ F' = F \cup f
       //    /\ UNCHANGED ...
-      BoundedQuantifiedExpression("\\E", List(QuantifierBound(List(lowerCaseTI, lowerCaseF),
+      BoundedQuantifiedExpression("\\E", List(BoundedVariableDeclaration(List(lowerCaseTI, lowerCaseF),
         UnaryExpression("SUBSET", ParenthesizedExpression(
           BinaryExpression("\\", ProcSet, ParenthesizedExpression(BinaryExpression("\\cup", TI, F)))
         ))
@@ -706,7 +706,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       BoundedQuantifiedExpression("\\E", List(selfInProcSetMaybeWithoutF),
         BoundedQuantifiedExpression("\\E", List(thdInThreadSetSelf), foldToDisjunction(generatedTlaActions))))
 
-  private def selfInProcSetMaybeWithoutF = if epcCtx.failStopConfigured then QuantifierBound(self, BinaryExpression("\\", ProcSet, F)) else selfInProcSet
+  private def selfInProcSetMaybeWithoutF = if epcCtx.failStopConfigured then BoundedVariableDeclaration(self, BinaryExpression("\\", ProcSet, F)) else selfInProcSet
 
   /**
    * Maps each operator definition (p_j_1A(self, thd) == ...) to an identifier application ( p_j_1A(self, thd) )
@@ -744,8 +744,8 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   private def locationThreadsDisjunctionSelfInDomain(locEnum: Enumerator) =
     val domain = enumeratorDomainToSet(locEnum)
     if epcCtx.failStopConfigured
-      then QuantifierBound(self, BinaryExpression("\\", domain, F))
-      else QuantifierBound(self, domain)
+      then BoundedVariableDeclaration(self, BinaryExpression("\\", domain, F))
+      else BoundedVariableDeclaration(self, domain)
 
   /**
    * Flattens an operation recursively.
@@ -1233,7 +1233,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       )))
     )
     val messageHandlingEffect = BoundedQuantifiedExpression("\\E", List(
-      QuantifierBound(messageBinder, UnaryExpression("DOMAIN", FunctionApplication(AE, List(channelExpr))))),
+      BoundedVariableDeclaration(messageBinder, UnaryExpression("DOMAIN", FunctionApplication(AE, List(channelExpr))))),
       ConjunctionList(
         List(sourcePrecondition, targetPrecondition)
         ++ failureDetectorUpdate
@@ -1246,7 +1246,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     // E.g. (j \ in 1..N) c@j?(x) --> /\ \E j \in 1..N : /\ c \in ChanSet /\ ...
     enumeratorOption.map(enumerator => {
       val (indexSetBinder, indexSet) = enumeratorToBoundVariableAndIndexSetWithRewrite(enumerator, locationVariables)
-      List(BoundedQuantifiedExpression("\\E", List(QuantifierBound(indexSetBinder, indexSet)), ConjunctionList(receiveConjuncts)))
+      List(BoundedQuantifiedExpression("\\E", List(BoundedVariableDeclaration(indexSetBinder, indexSet)), ConjunctionList(receiveConjuncts)))
     }).getOrElse(receiveConjuncts)
   }
 
@@ -1279,7 +1279,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     // E.g. (j \ in 1..N) c@j?(x) --> /\ \E j \in 1..N : /\ c \in SuspChanSet /\ ...
     enumeratorOption.map(enumerator => {
       val (indexSetBinder, indexSet) = enumeratorToBoundVariableAndIndexSetWithRewrite(enumerator, locationVariables)
-      List(BoundedQuantifiedExpression("\\E", List(QuantifierBound(indexSetBinder, indexSet)), ConjunctionList(suspectConjuncts)))
+      List(BoundedQuantifiedExpression("\\E", List(BoundedVariableDeclaration(indexSetBinder, indexSet)), ConjunctionList(suspectConjuncts)))
     }).getOrElse(suspectConjuncts)
   }
 
@@ -1343,7 +1343,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         val remainingIndices = BinaryExpression("\\", allIndices, alreadySend)
         val raUpdateOnThreadExitForMultiSend = Option.when(isThreadExit)(generateRAUpdateForMultiSend(indexBinder, allIndices))
         List(
-          BoundedQuantifiedExpression("\\E", List(QuantifierBound(indexBinder, remainingIndices)), ConjunctionList(
+          BoundedQuantifiedExpression("\\E", List(BoundedVariableDeclaration(indexBinder, remainingIndices)), ConjunctionList(
             List(
               generatePreconditionForMultiSend(indexBinder, multipleMessages, locationVariables),
               generateChannelUpdateForMultiSend(indexBinder, multipleMessages, locationVariables),
@@ -1372,7 +1372,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         val channelPrecondition = BinaryExpression("\\in", channelExpr, ChanSet)
         val targetPrecondition = BinaryExpression("\\in", targetExpr, ProcSet)
         List(
-          BoundedQuantifiedExpression("\\E", List(QuantifierBound(boundVariable, remainingIndices)), ConjunctionList(
+          BoundedQuantifiedExpression("\\E", List(BoundedVariableDeclaration(boundVariable, remainingIndices)), ConjunctionList(
             List(
               channelPrecondition,
               targetPrecondition,
@@ -1634,7 +1634,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       case literal: Literal => rewriteFn(literal)
       case identifier: Identifier => rewriteFn(identifier)
       case IdentifierTuple(identifiers) => Tuple(identifiers.map(rewriteFn))
-      case qb@QuantifierBound(variable, domain) => qb.copy(domain = rewriteFn(domain))
+      case boundedVarDeclaration@BoundedVariableDeclaration(variable, domain) => boundedVarDeclaration.copy(domain = rewriteFn(domain))
       case m@Mapping(identifier, expression) => m.copy(expression = rewriteFn(expression))
       case Tuple(expressions) => Tuple(expressions.map(rewriteFn))
       case expr@UnaryExpression(_, expression) => expr.copy(expression = rewriteFn(expression))
@@ -1649,9 +1649,9 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         CaseExpression(caseArms.map(caseArm => CaseArm(rewriteFn(caseArm.lhs), rewriteFn(caseArm.rhs))), defaultExpression.map(rewriteFn))
       case ChooseExpression(identifier, domain, predicate) =>
         ChooseExpression(identifier, rewriteFn(domain), rewriteFn(predicate))
-      case expr@BoundedQuantifiedExpression(quantifiers, binders, body) =>
+      case expr@BoundedQuantifiedExpression(quantifier, binders, body) =>
         expr.copy(
-          binders = binders.map((quantifierBound: QuantifierBound) => QuantifierBound(quantifierBound.variable, rewriteFn(quantifierBound.domain))),
+          binders = binders.map((boundedVarDeclaration: BoundedVariableDeclaration) => BoundedVariableDeclaration(boundedVarDeclaration.variable, rewriteFn(boundedVarDeclaration.domain))),
           body = rewriteFn(body)
         )
       case expr@QuantifiedExpression(quantifier, binders, body) => expr.copy(body = rewriteFn(body))
@@ -1660,15 +1660,15 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       case ExplicitSet(values) => ExplicitSet(values.map(rewriteFn))
       case bsc@BoundedSetComprehension(variable, domain, predicate) =>
         bsc.copy(domain = rewriteFn(domain), predicate = rewriteFn(predicate))
-      case QuantifiedSetComprehension(mappingExpression, quantifierBounds) =>
+      case QuantifiedSetComprehension(mappingExpression, boundedVariableDeclarations) =>
         QuantifiedSetComprehension(
           rewriteFn(mappingExpression),
-          quantifierBounds.map((qb: QuantifierBound) => QuantifierBound(qb.variable, rewriteFn(qb.domain)))
+          boundedVariableDeclarations.map((variableDeclaration: BoundedVariableDeclaration) => BoundedVariableDeclaration(variableDeclaration.variable, rewriteFn(variableDeclaration.domain)))
         )
       case ExplicitFunction(mappings) => ExplicitFunction(mappings.map(mapping => mapping.copy(expression = rewriteFn(mapping.expression))))
-      case BoundedMapping(quantifierBounds, expression) =>
+      case BoundedMapping(boundedVariableDeclarations, expression) =>
         BoundedMapping(
-          quantifierBounds.map((qb: QuantifierBound) => QuantifierBound(qb.variable, rewriteFn(qb.domain))),
+          boundedVariableDeclarations.map((variableDeclaration: BoundedVariableDeclaration) => BoundedVariableDeclaration(variableDeclaration.variable, rewriteFn(variableDeclaration.domain))),
           rewriteFn(expression)
         )
       case setOfAllFunctions@SetOfAllFunctions(domain, codomain) => SetOfAllFunctions(rewriteFn(domain), rewriteFn(codomain))
@@ -1750,29 +1750,29 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   }
 
   /**
-   * Renames the "from" identifier to the "to" identifier in target quantifier bound, if the depth is positive.
+   * Renames the "from" identifier to the "to" identifier in the target bounded variable declaration, if the depth is positive.
    */
-  private def renameBV(from: Identifier, to: Identifier, qb: QuantifierBound, depth: Int): QuantifierBound = {
-    // If we encounter the "from" identifier as the binder in the quantifier bound, we rename it, and we keep the domain as it is.
-    if (bv(qb).contains(from) && depth > 0) {
-      QuantifierBound(renameBV(from, to, qb.variable), qb.domain)
+  private def renameBV(from: Identifier, to: Identifier, variableDeclaration: BoundedVariableDeclaration, depth: Int): BoundedVariableDeclaration = {
+    // If we encounter the "from" identifier as the binder in the bounded variable declaration, we rename it, and we keep the domain as it is.
+    if (bv(variableDeclaration).contains(from) && depth > 0) {
+      BoundedVariableDeclaration(renameBV(from, to, variableDeclaration.variable), variableDeclaration.domain)
     }
     // If we encounter the "from" identifier as the binder, but depth == 0 (meaning we should not rename further)
     // We keep the binder the same, but rename all free occurrences in the domain.
-    else if (bv(qb).contains(from) && depth == 0) {
-      QuantifierBound(qb.variable, renameBV(from, to, qb.domain, depth))
+    else if (bv(variableDeclaration).contains(from) && depth == 0) {
+      BoundedVariableDeclaration(variableDeclaration.variable, renameBV(from, to, variableDeclaration.domain, depth))
     }
     // If we encounter another binder, we leave it as it is and substitute recursively in the domain.
     else {
-      QuantifierBound(qb.variable, renameBV(from, to, qb.domain, depth))
+      BoundedVariableDeclaration(variableDeclaration.variable, renameBV(from, to, variableDeclaration.domain, depth))
     }
   }
 
   /**
-   * Renames the "from" identifier to the "to" identifier in the list with quantifier bounds, if the depth is positive.
+   * Renames the "from" identifier to the "to" identifier in the list with bounded variable declaration, if the depth is positive.
    */
-  private def renameBV(from: Identifier, to: Identifier, qbs: List[QuantifierBound], depth: Int): List[QuantifierBound] =
-    qbs.map(renameBV(from, to, _, depth: Int))
+  private def renameBV(from: Identifier, to: Identifier, variableDeclarations: List[BoundedVariableDeclaration], depth: Int): List[BoundedVariableDeclaration] =
+    variableDeclarations.map(renameBV(from, to, _, depth: Int))
 
   /**
    * Renames the "from" identifier to the "to" identifier in target expression, if the depth is positive.
@@ -1783,7 +1783,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       case identifier: Identifier if identifier == from => to
       case identifier: Identifier => identifier
       case IdentifierTuple(identifiers) => Tuple(identifiers.map(renameBV(from, to, _, depth)))
-      case quantifierBound: QuantifierBound => renameBV(from, to, quantifierBound, depth)
+      case boundedVariableDeclaration: BoundedVariableDeclaration => renameBV(from, to, boundedVariableDeclaration, depth)
       case Mapping(identifier, expression) => Mapping(identifier, renameBV(from, to, expression, depth))
       case Tuple(expressions) => Tuple(expressions.map(renameBV(from, to, _, depth)))
       case expr@UnaryExpression(_, expression) => expr.copy(expression = renameBV(from, to, expression, depth))
@@ -1856,29 +1856,29 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           renameBV(from, to, domain, depth),
           renameBV(from, to, predicate, depth)
         )
-      case QuantifiedSetComprehension(mappingExpression, quantifierBounds) if bv(quantifierBounds).contains(from) && depth > 0 =>
+      case QuantifiedSetComprehension(mappingExpression, boundedVariableDeclarations) if bv(boundedVariableDeclarations).contains(from) && depth > 0 =>
         QuantifiedSetComprehension(
           renameBV(from, to, mappingExpression, depth - 1),
-          renameBV(from, to, quantifierBounds, depth)
+          renameBV(from, to, boundedVariableDeclarations, depth)
         )
-      case QuantifiedSetComprehension(mappingExpression, quantifierBounds) if bv(quantifierBounds).contains(from) && depth == 0 =>
-        QuantifiedSetComprehension(mappingExpression, quantifierBounds)
-      case QuantifiedSetComprehension(mappingExpression, quantifierBounds) =>
+      case QuantifiedSetComprehension(mappingExpression, boundedVariableDeclarations) if bv(boundedVariableDeclarations).contains(from) && depth == 0 =>
+        QuantifiedSetComprehension(mappingExpression, boundedVariableDeclarations)
+      case QuantifiedSetComprehension(mappingExpression, boundedVariableDeclarations) =>
         QuantifiedSetComprehension(
           renameBV(from, to, mappingExpression, depth),
-          renameBV(from, to, quantifierBounds, depth)
+          renameBV(from, to, boundedVariableDeclarations, depth)
         )
       case ExplicitFunction(mappings) => ExplicitFunction(mappings.map(renameBV(from, to, _, depth).asInstanceOf[Mapping]))
-      case BoundedMapping(quantifierBounds, expression) if bv(quantifierBounds).contains(from) && depth > 0 =>
+      case BoundedMapping(boundedVariableDeclarations, expression) if bv(boundedVariableDeclarations).contains(from) && depth > 0 =>
         BoundedMapping(
-          renameBV(from, to, quantifierBounds, depth),
+          renameBV(from, to, boundedVariableDeclarations, depth),
           renameBV(from, to, expression, depth - 1)
         )
-      case BoundedMapping(quantifierBounds, expression) if bv(quantifierBounds).contains(from) && depth == 0 =>
-        BoundedMapping(quantifierBounds, expression)
-      case BoundedMapping(quantifierBounds, expression) =>
+      case BoundedMapping(boundedVariableDeclarations, expression) if bv(boundedVariableDeclarations).contains(from) && depth == 0 =>
+        BoundedMapping(boundedVariableDeclarations, expression)
+      case BoundedMapping(boundedVariableDeclarations, expression) =>
         BoundedMapping(
-          renameBV(from, to, quantifierBounds, depth),
+          renameBV(from, to, boundedVariableDeclarations, depth),
           renameBV(from, to, expression, depth)
         )
       case SetOfAllFunctions(domain, codomain) => SetOfAllFunctions(renameBV(from, to, domain, depth), renameBV(from, to, codomain, depth))
@@ -1935,14 +1935,14 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   }
 
   /**
-   * Returns a set with the bound variables of a quantifier bound.
+   * Returns a set with the bound variables of a bounded variable declaration.
    */
-  private def bv(qb: QuantifierBound): immutable.Set[Identifier] = bv(qb.variable)
+  private def bv(variableDeclaration: BoundedVariableDeclaration): immutable.Set[Identifier] = bv(variableDeclaration.variable)
 
   /**
-   * Returns a set with the bound variables of a list of quantifier bounds.
+   * Returns a set with the bound variables of a list of bounded variable declarations.
    */
-  private def bv(qbs: List[QuantifierBound]): immutable.Set[Identifier] = qbs.toSet.flatMap(bv)
+  private def bv(variableDeclarations: List[BoundedVariableDeclaration]): immutable.Set[Identifier] = variableDeclarations.toSet.flatMap(bv)
 
   /**
    * Small utility method for the creation of unique identifiers.

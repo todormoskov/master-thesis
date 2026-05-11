@@ -88,9 +88,9 @@ case class OperatorDefinition(signature: NonFixLHS, body: Expression) extends Mo
  */
 case class NonFixLHS(identifier: Identifier, arguments: List[Identifier | OperatorDeclaration]) extends AST
 /**
- * FunctionDefinition :=  Identifier '[' CommaList(QuantifierBound) ']' '==' Expression
+ * FunctionDefinition :=  Identifier '[' CommaList(BoundedVariableDeclaration) ']' '==' Expression
  */
-case class FunctionDefinition(identifier: Identifier, arguments: List[QuantifierBound], body: Expression) extends ModuleUnit
+case class FunctionDefinition(identifier: Identifier, arguments: List[BoundedVariableDeclaration], body: Expression) extends ModuleUnit
 /**
  * Instance := 'INSTANCE' Identifier ['WITH' CommaList(Substitution)]
  */
@@ -178,9 +178,9 @@ case class Identifier(name: String) extends Expression
  */
 case class IdentifierTuple(identifiers: List[Identifier]) extends Expression
 /**
- * Examples for quantifier bounds: "n \in Nat", "n, m \in Nat" or "<< n, m >> \in Nat \times Nat".
+ * Examples for bounded variable declarations: "n \in Nat", "n, m \in Nat" or "<< n, m >> \in Nat \times Nat".
  */
-case class QuantifierBound(variable: Identifier | List[Identifier] | IdentifierTuple, domain: Expression) extends Expression
+case class BoundedVariableDeclaration(variable: Identifier | List[Identifier] | IdentifierTuple, domain: Expression) extends Expression
 /**
  * An identifier to expression mapping. E.g. x |-> 1 or x : 1..10.
  */
@@ -246,7 +246,7 @@ case class ChooseExpression(variable: Identifier | IdentifierTuple, domain: Expr
 /**
  * TLA+ bounded quantified expression. E.g. \E x \in S: ...; \A x \in S: ...
  */
-case class BoundedQuantifiedExpression(quantifier: String, binders: List[QuantifierBound], body: Expression) extends Expression
+case class BoundedQuantifiedExpression(quantifier: String, binders: List[BoundedVariableDeclaration], body: Expression) extends Expression
 /**
  * TLA+ quantified expression. E.g. \E x, y: ...; \A x, y : ...
  */
@@ -278,11 +278,11 @@ case class BoundedSetComprehension(variable: Identifier | IdentifierTuple, domai
 /**
  * General quantified set comprehension. E.g. { f(x, y) : x \in S, y \in T }.
  */
-case class QuantifiedSetComprehension(mappingExpression: Expression, quantifierBounds: List[QuantifierBound]) extends Set
+case class QuantifiedSetComprehension(mappingExpression: Expression, boundedVariableDeclarations: List[BoundedVariableDeclaration]) extends Set
 
 sealed trait Function extends Expression
 case class ExplicitFunction(mappings: List[Mapping]) extends Function
-case class BoundedMapping(quantifierBounds: List[QuantifierBound], expression: Expression) extends Function
+case class BoundedMapping(boundedVariableDeclarations: List[BoundedVariableDeclaration], expression: Expression) extends Function
 case class SetOfAllFunctions(domain: Expression, codomain: Expression) extends Function
 case class SetOfAllRecords(mappings: List[Mapping]) extends Function
 
@@ -883,12 +883,12 @@ class Parser(lexer: Tokenizer) {
   /**
    * Parse a function definition.
    *
-   * FunctionDefinition :=  Identifier '[' CommaList(QuantifierBound) ']' '==' Expression
+   * FunctionDefinition :=  Identifier '[' CommaList(BoundedVariableDeclaration) ']' '==' Expression
    */
   private def parseFunctionDefinition(): Either[String, FunctionDefinition] = for {
     identifier <- parseIdentifier()
     _ <- consume(TokenKind.LEFT_SQUARE_BRACKET)
-    arguments <- parseCommaListOfQuantifierBounds()
+    arguments <- parseCommaListOfBoundedVariableDeclarations()
     _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
     _ <- consume(TokenKind.DEFINE)
     body <- parseExpression()
@@ -1713,7 +1713,7 @@ class Parser(lexer: Tokenizer) {
   /**
    * Parse a (bounded) quantified expression.
    *
-   * BoundedQuantifiedExpression := ['\E' | '\A'] CommaList(QuantifierBound) ':' Expression
+   * BoundedQuantifiedExpression := ['\E' | '\A'] CommaList(BoundedVariableDeclaration) ':' Expression
    *
    * QuantifiedExpression := ['\E' | '\A'] CommaList(Identifier) ':' Expression
    *
@@ -1722,9 +1722,9 @@ class Parser(lexer: Tokenizer) {
   private def parseQuantifiedExpression(): Either[String, BoundedQuantifiedExpression | QuantifiedExpression] =
     for {
       token <- if check(TokenKind.EXISTS) then consume(TokenKind.EXISTS) else consume(TokenKind.FORALL)
-      expr <- if checkCommaListOfQuantifierBounds()
+      expr <- if checkCommaListOfBoundedVariableDeclarations()
         then for {
-          binders <- parseCommaListOfQuantifierBounds()
+          binders <- parseCommaListOfBoundedVariableDeclarations()
           _ <- consume(TokenKind.COLON)
           body <- parseExpression()
         } yield BoundedQuantifiedExpression(token.value, binders, body)
@@ -1822,9 +1822,9 @@ class Parser(lexer: Tokenizer) {
               if check(TokenKind.COLON) then for {
                 // Here we parse the rest as if we are parsing a quantified set comprehension.
                 _ <- consume(TokenKind.COLON)
-                quantifierBounds <- parseCommaListOfQuantifierBounds()
+                boundedVariableDeclarations <- parseCommaListOfBoundedVariableDeclarations()
                 _ <- consume(TokenKind.RIGHT_CURLY_BRACKET)
-              } yield QuantifiedSetComprehension(firstExpr, quantifierBounds)
+              } yield QuantifiedSetComprehension(firstExpr, boundedVariableDeclarations)
               // If we find a comma instead, we know that we have
               // an explicitly given set of expressions, and we can
               // simply parse them
@@ -1875,18 +1875,18 @@ class Parser(lexer: Tokenizer) {
     else Left(error("Identifier or tuple not recognized"))
 
   /**
-   * Check if the next tokens are part of a quantifier bound.
+   * Check if the next tokens are part of a bounded variable declaration.
    * Here check for at most 3 identifiers!
    *
-   * Examples for quantifier bounds:
+   * Examples for bounded variable declarations:
    * - n \in Nat
    * - n, m \in Nat
    * - n \in Nat, m \in Nat
    * - << n, m >> \in Nat \times Nat
    *
-   * @return True if the next tokens are part of a quantifier bound.
+   * @return True if the next tokens are part of a bounded variable declaration.
    */
-  private def checkCommaListOfQuantifierBounds(): Boolean = {
+  private def checkCommaListOfBoundedVariableDeclarations(): Boolean = {
     if check(TokenKind.IDENTIFIER)
     then check(List(TokenKind.IDENTIFIER, TokenKind.SET_IN))
       || check(List(TokenKind.IDENTIFIER, TokenKind.COMMA, TokenKind.IDENTIFIER, TokenKind.SET_IN))
@@ -1899,23 +1899,23 @@ class Parser(lexer: Tokenizer) {
   }
 
   /**
-   * Parse a quantifier bound.
+   * Parse a bounded variable declaration.
    *
-   * QuantifierBound := [Identifier | CommaList(Identifier) | IdentifierTuple] '\in' Expression
+   * BoundedVariableDeclaration := [Identifier | CommaList(Identifier) | IdentifierTuple] '\in' Expression
    *
    * @return
    */
-  private def parseQuantifierBound(): Either[String, QuantifierBound] =
+  private def parseBoundedVariableDeclaration(): Either[String, BoundedVariableDeclaration] =
     for {
       identifierOrTuple <- if check(List(TokenKind.IDENTIFIER, TokenKind.COMMA))
         then parseCommaListOfIdentifiers()
         else parseIdentifierOrTuple()
       _ <- consume(TokenKind.SET_IN)
       expression <- parseExpression()
-    } yield QuantifierBound(identifierOrTuple, expression)
+    } yield BoundedVariableDeclaration(identifierOrTuple, expression)
 
-  private def parseCommaListOfQuantifierBounds(): Either[String, List[QuantifierBound]] =
-    parseCommaList[QuantifierBound](() => parseQuantifierBound())
+  private def parseCommaListOfBoundedVariableDeclarations(): Either[String, List[BoundedVariableDeclaration]] =
+    parseCommaList[BoundedVariableDeclaration](() => parseBoundedVariableDeclaration())
 
   /**
    * Parse an identifier to expression mapping.
@@ -1964,13 +1964,13 @@ class Parser(lexer: Tokenizer) {
       functionOrSetOfFunctions <- {
         // First, we check if there is an explicit mapping of elements
         // from a domain to an expression (e.g. [n \in Nat |-> n^2] ).
-        if checkCommaListOfQuantifierBounds()
+        if checkCommaListOfBoundedVariableDeclarations()
         then for {
-          quantifierBounds <- parseCommaListOfQuantifierBounds()
+          boundedVariableDeclarations <- parseCommaListOfBoundedVariableDeclarations()
           _ <- consume(TokenKind.MAPS_TO)
           expression <- parseExpression()
           _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
-        } yield BoundedMapping(quantifierBounds, expression)
+        } yield BoundedMapping(boundedVariableDeclarations, expression)
         else for {
           // Otherwise, we need to parse the first expression and
           // inspect it (and the following tokens) in order to know

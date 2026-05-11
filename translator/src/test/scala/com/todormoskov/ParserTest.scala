@@ -218,7 +218,7 @@ class ParserTest extends AnyFunSuite {
       FunctionDefinition(
         Identifier("f"),
         List(
-          QuantifierBound(
+          BoundedVariableDeclaration(
             Identifier("x"),
             Identifier("S")
           )
@@ -241,11 +241,11 @@ class ParserTest extends AnyFunSuite {
       FunctionDefinition(
         Identifier("f"),
         List(
-          QuantifierBound(
+          BoundedVariableDeclaration(
             Identifier("x"),
             Identifier("S")
           ),
-          QuantifierBound(
+          BoundedVariableDeclaration(
             Identifier("y"),
             Identifier("T")
           )
@@ -269,7 +269,7 @@ class ParserTest extends AnyFunSuite {
       FunctionDefinition(
         Identifier("h"),
         List(
-          QuantifierBound(
+          BoundedVariableDeclaration(
             List(
               Identifier("i"),
               Identifier("j")
@@ -299,7 +299,7 @@ class ParserTest extends AnyFunSuite {
       FunctionDefinition(
         Identifier("addPair"),
         List(
-          QuantifierBound(
+          BoundedVariableDeclaration(
             IdentifierTuple(
               List(
                 Identifier("i"),
@@ -508,7 +508,7 @@ class ParserTest extends AnyFunSuite {
       QuantifiedSetComprehension(
         Identifier("n"),
         List(
-          QuantifierBound(
+          BoundedVariableDeclaration(
             Identifier("n"),
             Identifier("Nat")
           )
@@ -529,18 +529,18 @@ class ParserTest extends AnyFunSuite {
         Literal(true)))
   }
 
-  test("Parses a function with a single quantifier bound") {
+  test("Parses a function with a single bounded variable declaration") {
     val inputSpec =
       """[ n \in Nat |-> n ]""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
     assert(ast ==
       BoundedMapping(
-        List(QuantifierBound(Identifier("n"), Identifier("Nat"))),
+        List(BoundedVariableDeclaration(Identifier("n"), Identifier("Nat"))),
         Identifier("n")))
   }
 
-  test("Parses a function with a multiple quantifier bounds") {
+  test("Parses a function with a multiple bounded variable declarations") {
     val inputSpec =
       """[ n \in Nat, m \in Nat |-> n ]""".stripMargin
 
@@ -548,13 +548,13 @@ class ParserTest extends AnyFunSuite {
     assert(ast ==
       BoundedMapping(
         List(
-          QuantifierBound(Identifier("n"), Identifier("Nat")),
-          QuantifierBound(Identifier("m"), Identifier("Nat"))
+          BoundedVariableDeclaration(Identifier("n"), Identifier("Nat")),
+          BoundedVariableDeclaration(Identifier("m"), Identifier("Nat"))
         ),
         Identifier("n")))
   }
 
-  test("Parses a function with a single quantifier bound with multiple variables") {
+  test("Parses a function with a single bounded variable declaration of multiple variables") {
     val inputSpec =
       """[ n, m \in Nat |-> n ]""".stripMargin
 
@@ -562,12 +562,12 @@ class ParserTest extends AnyFunSuite {
     assert(ast ==
       BoundedMapping(
         List(
-          QuantifierBound(List(Identifier("n"), Identifier("m")), Identifier("Nat")),
+          BoundedVariableDeclaration(List(Identifier("n"), Identifier("m")), Identifier("Nat")),
         ),
         Identifier("n")))
   }
 
-  test("Parses a function with a single quantifier bound, which is a pair") {
+  test("Parses a function with a single bounded variable declaration, which is a pair") {
     val inputSpec =
       """[ << n, m >> \in NatPairs |-> n ]""".stripMargin
 
@@ -575,12 +575,12 @@ class ParserTest extends AnyFunSuite {
     assert(ast ==
       BoundedMapping(
         List(
-          QuantifierBound(IdentifierTuple(List(Identifier("n"), Identifier("m"))), Identifier("NatPairs")),
+          BoundedVariableDeclaration(IdentifierTuple(List(Identifier("n"), Identifier("m"))), Identifier("NatPairs")),
         ),
         Identifier("n")))
   }
 
-  test("Parses a function with a multiple quantifier bounds, which are pairs") {
+  test("Parses a function with a multiple bounded variable declarations, which are pairs") {
     val inputSpec =
       """[ << n, m >> \in NatPairs, << k, l >> \in NatPairs |-> n ]""".stripMargin
 
@@ -588,8 +588,8 @@ class ParserTest extends AnyFunSuite {
     assert(ast ==
       BoundedMapping(
         List(
-          QuantifierBound(IdentifierTuple(List(Identifier("n"), Identifier("m"))), Identifier("NatPairs")),
-          QuantifierBound(IdentifierTuple(List(Identifier("k"), Identifier("l"))), Identifier("NatPairs")),
+          BoundedVariableDeclaration(IdentifierTuple(List(Identifier("n"), Identifier("m"))), Identifier("NatPairs")),
+          BoundedVariableDeclaration(IdentifierTuple(List(Identifier("k"), Identifier("l"))), Identifier("NatPairs")),
         ),
         Identifier("n")))
   }
@@ -1526,8 +1526,8 @@ class ParserTest extends AnyFunSuite {
       BoundedQuantifiedExpression(
         "\\E",
         List(
-          QuantifierBound(Identifier("x"), Identifier("S")),
-          QuantifierBound(Identifier("y"), Identifier("T"))),
+          BoundedVariableDeclaration(Identifier("x"), Identifier("S")),
+          BoundedVariableDeclaration(Identifier("y"), Identifier("T"))),
         IdentifierApplication(
           Identifier("P"),
           List(

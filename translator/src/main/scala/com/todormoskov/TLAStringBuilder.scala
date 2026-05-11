@@ -130,8 +130,8 @@ class TLAStringBuilder {
       case Identifier(name) => appendString(name)
       case IdentifierTuple(Nil) => appendString("<< >>")
       case IdentifierTuple(identifiers) => appendExpressions(identifiers, "<<", ", ", ">>")
-      case QuantifierBound(variable, domain) =>
-        val quantifier: Unit = variable match {
+      case BoundedVariableDeclaration(variable, domain) =>
+        variable match {
           case identifier: Identifier => appendExpression(identifier)
           case identifiers: List[Identifier] =>
             appendExpressions(identifiers, ", ")
@@ -303,17 +303,17 @@ class TLAStringBuilder {
         appendString(": ")
         appendExpression(predicate)
         appendString("}")
-      case QuantifiedSetComprehension(mappingExpression, quantifierBounds) =>
+      case QuantifiedSetComprehension(mappingExpression, boundedVariableDeclarations) =>
         appendString("{")
         appendExpression(mappingExpression)
         appendString(": ")
-        appendExpressions(quantifierBounds, ", ")
+        appendExpressions(boundedVariableDeclarations, ", ")
         appendString("}")
       case ExplicitFunction(mappings) =>
         appendExpressions(mappings, "[", ", ", "]")
-      case BoundedMapping(quantifierBounds, expression) =>
+      case BoundedMapping(boundedVariableDeclarations, expression) =>
         appendString("[")
-        appendExpressions(quantifierBounds, ", ")
+        appendExpressions(boundedVariableDeclarations, ", ")
         appendString(" |-> ")
         appendExpression(expression)
         appendString("]")
