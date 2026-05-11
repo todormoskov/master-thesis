@@ -1110,10 +1110,10 @@ class Parser(lexer: Tokenizer) {
     }
 
   /**
-   * Set with the token kinds '=', '/=', '<', '<=', '>', '>=', '\in', '\notin', '\subset' and '\sqsubseteq'.
+   * Set with the token kinds '=', '/=', '<', '<=', '>', '>=', '\in', '\notin', '\subset', '\subseteq' and '\sqsubseteq'.
    */
   private val relationalTokens = Set(TokenKind.EQ, TokenKind.NEQ, TokenKind.LT, TokenKind.LE, TokenKind.GT, TokenKind.GE,
-    TokenKind.SET_IN, TokenKind.NOTIN, TokenKind.SUBSET, TokenKind.SQSUBSETEQ)
+    TokenKind.SET_IN, TokenKind.NOTIN, TokenKind.SUBSET, TokenKind.SUBSETEQ, TokenKind.SQSUBSETEQ)
 
   /**
    * Parse an equality / relational / membership operator.

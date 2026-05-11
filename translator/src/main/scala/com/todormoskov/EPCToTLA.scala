@@ -24,8 +24,8 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   private val THD = "thd"
   private val CHAN = "_chan"
   private val SUSPCHAN = "_suspchan"
-  private val SUSPECT_OK = "suspectOK"
-  private val SUSPECTED = "suspected"
+  private val SUSPECT_OK = "SuspectOK"
+  private val SUSPECT = "suspect"
   private val SUSPECTOR = "suspector"
   private val CURRENT_TI = "currentTI"
   private val CURRENT_F = "currentF"
@@ -61,7 +61,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   private val chan = Identifier(CHAN)
   private val suspchan = Identifier(SUSPCHAN)
   private val suspectOK = Identifier(SUSPECT_OK)
-  private val suspected = Identifier(SUSPECTED)
+  private val suspect = Identifier(SUSPECT)
   private val suspector = Identifier(SUSPECTOR)
   private val currentTI = Identifier(CURRENT_TI)
   private val currentF = Identifier(CURRENT_F)
@@ -176,11 +176,11 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       tlaStringBuilder.appendNewline()
     )
 
-    // Generate the suspectOK predicate when "WeakAccuracy" is configured
+    // Generate the SuspectOK predicate when "WeakAccuracy" is configured
     val suspectOKOnWeakAccuracy = Option.when(epcCtx.weakAccuracyConfigured)(
       OperatorDefinition(
-        NonFixLHS(suspectOK, List(ti, f, suspected, suspector)),
-        BinaryExpression("/\\", BinaryExpression("#", ti, emptySet), BinaryExpression("\\notin", suspected, ti))
+        NonFixLHS(suspectOK, List(ti, f, suspect, suspector)),
+        BinaryExpression("/\\", BinaryExpression("#", ti, emptySet), BinaryExpression("\\notin", suspect, ti))
       )
     )
     suspectOKOnWeakAccuracy.foreach(suspectOKDefinition =>
@@ -188,9 +188,9 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       tlaStringBuilder.appendNewline()
     )
 
-    // Generate the suspectOK predicate when "EventualWeakAccuracy" is configured
+    // Generate the SuspectOK predicate when "EventualWeakAccuracy" is configured
     val suspectOKOnEventualWeakAccuracy = Option.when(epcCtx.eventualWeakAccuracyConfigured)(
-      OperatorDefinition(NonFixLHS(suspectOK, List(ti, f, suspected, suspector)), BinaryExpression("\\notin", suspected, ti))
+      OperatorDefinition(NonFixLHS(suspectOK, List(ti, f, suspect, suspector)), BinaryExpression("\\notin", suspect, ti))
     )
     suspectOKOnEventualWeakAccuracy.foreach(suspectOKDefinition =>
       tlaStringBuilder.appendUnit(suspectOKDefinition)
@@ -581,13 +581,15 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     val envOnFailStop = Option.when (epcCtx.failStopConfigured && !epcCtx.unreliableFailureDetection) (OperatorDefinition(
       NonFixLHS(Env, Nil),
       // \E f \in SUBSET (ProcSet \ F):
-      //    /\ failOK(F, f)
+      //    /\ f # {}
+      //    /\ FailOK(F, f)
       //    /\ F' = F \cup f
       //    /\ UNCHANGED ...
       BoundedQuantifiedExpression("\\E", List(QuantifierBound(lowerCaseF,
         UnaryExpression("SUBSET", ParenthesizedExpression(BinaryExpression("\\", ProcSet, F)))
       )), ConjunctionList(Nil
-        ++ Option.when(epcCtx.visibleTLAOperators.contains("failOK"))(IdentifierApplication(Identifier("failOK"), List(F, lowerCaseF)))
+        ++ Some(BinaryExpression("#", lowerCaseF, emptySet))
+        ++ Option.when(epcCtx.visibleTLAOperators.contains("FailOK"))(IdentifierApplication(Identifier("FailOK"), List(F, lowerCaseF)))
         ++ Some(BinaryExpression("=", PrimedExpression(F), BinaryExpression("\\cup", F, lowerCaseF)))
         ++ Some(UnchangedExpr(getUnchangedVars(tlaVariables, List(F))))
       ))
@@ -602,8 +604,9 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
     val envOption = Option.when(epcCtx.failStopConfigured && epcCtx.unreliableFailureDetection)(OperatorDefinition(
       NonFixLHS(Env, Nil),
       // \E ti, f \in SUBSET (ProcSet \ (TI \cup F)):
+      //    /\ ti # {} \/ f # {}
       //    /\ ti \cap f # {}
-      //    /\ failOK(F, f)
+      //    /\ FailOK(F, f)
       //    /\ TI' = TI \cup ti
       //    /\ F' = F \cup f
       //    /\ UNCHANGED ...
@@ -612,8 +615,9 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           BinaryExpression("\\", ProcSet, ParenthesizedExpression(BinaryExpression("\\cup", TI, F)))
         ))
       )), ConjunctionList(Nil
+        ++ Some(BinaryExpression("\\/", BinaryExpression("#", lowerCaseTI, emptySet), BinaryExpression("#", lowerCaseF, emptySet)))
         ++ Some(BinaryExpression("=", BinaryExpression("\\cap", lowerCaseTI, lowerCaseF), emptySet))
-        ++ Option.when(epcCtx.visibleTLAOperators.contains("failOK"))(IdentifierApplication(Identifier("failOK"), List(F, lowerCaseF)))
+        ++ Option.when(epcCtx.visibleTLAOperators.contains("FailOK"))(IdentifierApplication(Identifier("FailOK"), List(F, lowerCaseF)))
         ++ Some(BinaryExpression("=", PrimedExpression(TI), BinaryExpression("\\cup", TI, lowerCaseTI)))
         ++ Some(BinaryExpression("=", PrimedExpression(F), BinaryExpression("\\cup", F, lowerCaseF)))
         ++ Some(UnchangedExpr(getUnchangedVars(tlaVariables, List(TI, F))))

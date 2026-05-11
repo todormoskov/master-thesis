@@ -64,6 +64,7 @@ object Lexer {
     UNION,
     INTERSECT,
     SUBSET,
+    SUBSETEQ,
     SET_DIFFERENCE,
     BIG_SUBSET,
     BIG_UNION,
@@ -611,6 +612,7 @@ object Lexer {
             case "\\cap" => Token(TokenKind.INTERSECT, name, lineNum, col)
             case "\\intersect" => Token(TokenKind.INTERSECT, name, lineNum, col)
             case "\\subset" => Token(TokenKind.SUBSET, name, lineNum, col)
+            case "\\subseteq" => Token(TokenKind.SUBSETEQ, name, lineNum, col)
             case "\\" => Token(TokenKind.SET_DIFFERENCE, name, lineNum, col)
             case "\\X" => Token(TokenKind.TIMES, name, lineNum, col)
             case "\\times" => Token(TokenKind.TIMES, name, lineNum, col)

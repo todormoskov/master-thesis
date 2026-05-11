@@ -44,7 +44,7 @@ ChanSet == {c}
 
 SuspChanSet == {c}
 
-suspectOK(ti, f, suspected, suspector) == ti # {} /\ suspected \notin ti
+SuspectOK(ti, f, suspect, suspector) == ti # {} /\ suspect \notin ti
 
 Init == /\ TI = {}
         /\ trim = Undefined
@@ -153,7 +153,7 @@ waitRcvS(self, thd) == /\ pc[self][thd] = "wait"
 waitSusp(self, thd) == /\ pc[self][thd] = "wait"
                        /\ channel[self] \in SuspChanSet
                        /\ r[self] \in ProcSet
-                       /\ suspectOK(TI, F, r[self], self)
+                       /\ SuspectOK(TI, F, r[self], self)
                        /\ D' = [D EXCEPT ![self][channel[self]][r[self]] = FALSE]
                        /\ pc' = [pc EXCEPT ![self][thd] = "inc"]
                        /\ UNCHANGED <<TI, trim, F, AE, O, ra, channel, x, r, output>>
@@ -259,5 +259,5 @@ Inv == /\ TypeOK
 
 =============================================================================
 \* Modification History
-\* Last modified Sat Apr 18 17:08:43 CEST 2026 by todormoskov
+\* Last modified Mon May 11 15:46:47 CEST 2026 by todormoskov
 \* Created Mon Apr 13 20:07:44 CEST 2026 by todormoskov
