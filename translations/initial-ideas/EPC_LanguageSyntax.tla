@@ -1,14 +1,50 @@
 ------------------------- MODULE EPC_LanguageSyntax -------------------------
-EXTENDS Integers, Sequences, TLC, TLAPS
+EXTENDS Integers, Sequences, TLC, TLAPS, Bags
 
 (***************************************************************************
 Variable declarations and assignments:
 
-var x. var y . 0
+--EPC Consensus
 
-var x. <x := 10> . 0
+NEW c
 
-var x. <x := 10> . <x := x + 1> . 0
+(A = 1) [[ [x |-> Undefined] <| var x . << x := 10 >> . 0 ]]
+
+
+EPC:
+[[ [x |-> Undefined] <| var x . << x := 1 >> . 0 ]]
+-->(DECL)
+[[ [x |-> Initialized] <| << x := 1 >> . 0 ]]
+-->(ASSIGN)
+[[ [x |-> 1] <| 0 ]]
+-/->
+
+
+NEW c
+
+(1) [[ [] |>  c@2<< "Hello" >>. 0 ]] ||  (2) [[ [] |> var x. c@1(x). 0]]
+
+-->(SEND)
+
+(1) [[ [] |> 0 ]] || {{ c_{1 -> 2}<<"Hello">> }} || (2) [[ [x |-> Initilized] |> c@1(x). 0]]
+
+--> (RECEIVE)
+
+(1) [[ [] |> 0 ]] || {{ }} || (2) [[ [x |-> "Hello"] |> 0]]
+
+
+TLA+:
+CONSTANTS Undefined, Initialized
+VARIABLES pc, x
+
+Init == /\ pc = "1"
+        /\ x  = Undefined
+
+Next == /\ x = {1,2,3}
+        /\ x' = x \union {4}
+
+
+var x. << x := 10 >> . << x := x + 1 >> . 0
 ----------------------------------------------------------------------------
 Locations:
 
@@ -57,7 +93,7 @@ This will look like this within a location:
 or like this: 
 
 || (p \in 1..10) [[ 
-    [] |> 
+    [] |>
     var a. ( var x. <x := 10>. 0
            | var y. <y := 100>. 0
            | var z. <z := 1000>. 0)
@@ -204,7 +240,7 @@ after we call the thread:
 
 def assign10toX(x) = <x := 10>. 0 
 
-(p = 1) [[ [x |-> Initialized] |> declareXAndStop(x) ]] \* here we don't need to do that right?
+(p = 1) [[ [x |-> Initialized] |> declareXAndStop(x) ]] \* here we don't need to do that, right?
 
 
 Not necessary:
@@ -251,7 +287,6 @@ def anyThread(c, l, a) {
 Comparison to PlusCal:
 
 --algorithm Test {
-    variables x = Undefined;
     define {
         Literals(S) == [type : {"literal"}, val : S]
         
@@ -263,42 +298,72 @@ Comparison to PlusCal:
         
         Literal(v) == [type |-> "literal", val |-> v]
     }
-    {  
-        x := Literal(10);
+    process(p = 1)
+        variables y = Undefined;
+    {
+        first: y := 10;
     }
+    
+    process(q \in 2..3)
+        variables y = Undefined;
+    {
+        second: y := 10
+    }
+        
 }
  ***************************************************************************)
-\* BEGIN TRANSLATION (chksum(pcal) = "41a9fcb0" /\ chksum(tla) = "7fe5c723")
-VARIABLES x, pc
+\* BEGIN TRANSLATION (chksum(pcal) = "8a658289" /\ chksum(tla) = "49fda7d5")
+\* Process variable y of process p at line 302 col 19 changed to y_
+
+VARIABLE pc
 
 (* define statement *)
 Literals(S) == [type : {"literal"}, val : S]
 
-CONSTANT Undefined 
-ASSUME Undefined \notin Literals(Int) 
+CONSTANT Undefined
+ASSUME Undefined \notin Literals(Int)
 ASSUME Undefined \notin Int
 
 Literal(v) == [type |-> "literal", val |-> v]
 
-vars == << x, pc >>
+VARIABLES y_, y
 
-Init == (* Global variables *)
-        /\ x = Undefined
-        /\ pc = "Lbl_1"
+vars == << pc, y_, y >>
 
-Lbl_1 == /\ pc = "Lbl_1"
-         /\ x' = Literal(10)
-         /\ pc' = "Done"
+ProcSet == {1} \cup (2..3)
+
+Init == (* Process p *)
+        /\ y_ = Undefined
+        (* Process q *)
+        /\ y = [self \in 2..3 |-> Undefined]
+        /\ pc = [self \in ProcSet |-> CASE self = 1 -> "first"
+                                        [] self \in 2..3 -> "second"]
+
+first == /\ pc[1] = "first"
+         /\ y_' = 10
+         /\ pc' = [pc EXCEPT ![1] = "Done"]
+         /\ y' = y
+
+p == first
+
+second(self) == /\ pc[self] = "second"
+                /\ y' = [y EXCEPT ![self] = 10]
+                /\ pc' = [pc EXCEPT ![self] = "Done"]
+                /\ y_' = y_
+
+q(self) == second(self)
 
 (* Allow infinite stuttering to prevent deadlock on termination. *)
-Terminating == pc = "Done" /\ UNCHANGED vars
+Terminating == /\ \A self \in ProcSet: pc[self] = "Done"
+               /\ UNCHANGED vars
 
-Next == Lbl_1
+Next == p
+           \/ (\E self \in 2..3: q(self))
            \/ Terminating
 
 Spec == Init /\ [][Next]_vars
 
-Termination == <>(pc = "Done")
+Termination == <>(\A self \in ProcSet: pc[self] = "Done")
 
 \* END TRANSLATION 
 
@@ -308,7 +373,22 @@ BY Undefined \notin Literals(Int) DEF Literals, Literal
 THEOREM 1 # Undefined
 BY Undefined \notin Int
 
+test == 1
+
+(*
+\* c[n \in {1,2}, m \in {3,4}] == EmptyBag
+VARIABLE c, pc
+
+InitC == /\ c = [n, m \in {1,2} |-> EmptyBag]
+         /\ pc = "1"
+
+NextC == /\ pc = "1"
+         /\ c' = [c EXCEPT ![1,1] = @ (+) SetToBag({"Hello"})]
+         /\ pc' = "2"
+*)
+
+
 =============================================================================
 \* Modification History
-\* Last modified Fri Oct 24 17:14:22 CEST 2025 by todormoskov
+\* Last modified Mon Dec 15 10:32:06 CET 2025 by todormoskov
 \* Created Fri Oct 17 12:03:56 CEST 2025 by todormoskov
