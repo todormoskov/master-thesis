@@ -146,7 +146,6 @@ object Lexer {
     EPC_THREAD_COMPOSITION,
     EPC_MULTISET_OPEN,
     EPC_MULTISET_CLOSE,
-    EPC_NEW,
     EPC_CHAN,
     EPC_SUSPCHAN,
     EPC_IF,
@@ -686,7 +685,6 @@ object Lexer {
             case "SF" => Token(TokenKind.SF, name, lineNum, col)
             // EPC operators
             case "var" => Token(TokenKind.EPC_VAR, name, lineNum, col)
-            case "new" => Token(TokenKind.EPC_NEW, name, lineNum, col)
             case "chan" => Token(TokenKind.EPC_CHAN, name, lineNum, col)
             case "suspchan" => Token(TokenKind.EPC_SUSPCHAN, name, lineNum, col)
             case "if" => Token(TokenKind.EPC_IF, name, lineNum, col)

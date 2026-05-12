@@ -1276,14 +1276,14 @@ class LexerTest extends AnyFunSuite {
 
   test("Recognizes EPC channel definitions") {
     val inputSpec =
-      """new c""".stripMargin
+      """chan c""".stripMargin
 
     val tokens = recognizeTokens(inputSpec)
     assert(tokens ==
       List(
-        Token(TokenKind.EPC_NEW, "new", 1, 1),
-        Token(TokenKind.IDENTIFIER, "c", 1, 5),
-        Token(TokenKind.EOF, null, 1, 6)
+        Token(TokenKind.EPC_CHAN, "chan", 1, 1),
+        Token(TokenKind.IDENTIFIER, "c", 1, 6),
+        Token(TokenKind.EOF, null, 1, 7)
       )
     )
   }

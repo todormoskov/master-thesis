@@ -462,14 +462,14 @@ case class ThreadComprehension(enumerator: Enumerator, body: Thread) extends Out
 /**
  * ThreadComposition := ThreadComprehension '|' ThreadComprehension
  *
- * E.g. (j = 1) (<< x := j >>) | (k = 2) (<< x := k >>)
+ * E.g. (j = 1) (<< x := 1 >>) | (k = 2) (<< x := 2 >>)
  */
 case class ThreadComposition(lhs: OuterThread, rhs: OuterThread) extends OuterThread
 /**
  * ThreadDefinition := 'def' Identifier [ '(' CommaList(Identifier) ')' ] ? '=' Thread
  *
- * E.g. def declareXAndStop = var x. 0
- *      def assignXAndStop(x) = << x := 10 >> . 0
+ * E.g. def declareXAndStop = var x
+ *      def assignXAndStop(x) = << x := 10 >>
  */
 case class ThreadDefinition(identifier: Identifier, freeVariables: List[Identifier], body: Thread) extends EPCSpecUnit
 /**
@@ -479,14 +479,14 @@ sealed trait Network extends EPCSpecUnit
 /**
  * Process := '[[' ExplicitFunction '<|' Thread ']]'
  *
- * E.g. [[ [x |-> Undefined] <| var x. << x := 10 >> . 0 ]]
+ * E.g. [[ [x |-> Undefined] <| (t = 1) (var x; << x := 10 >>) ]]
  */
 case class Process(memory: ExplicitFunction, body: OuterThread) extends AST
 /**
  * LocationComprehension := Enumerator Process
  *
- * E.g. (p = 1) [[ [x |-> Undefined] |> var x. << x := 10 >>. 0 ]]
- *      (p \in 1..10) [[ [x |-> Undefined] |> var x. << x := 10 >>. 0 ]]
+ * E.g. (p = 1) [[ [x |-> Undefined] <| (t = 1) (var x; << x := 10 >>) ]]
+ *      (p \in 1..10) [[ [x |-> Undefined] <| (t = 1) (var x; << x := 10 >>) ]]
  */
 case class Location(enumerator: Enumerator, body: Process) extends Network
 /**
@@ -498,7 +498,7 @@ case class MessageAether(messages: MultiSet[TravellingMessage]) extends Network
 /**
  * NetworkComposition := Network '||' Network
  *
- * E.g. (p = 1) [[ [x |-> Initialized] <| c@2(x) . 0 ]] || {{ c_{2 -> 1}<< "Hello from 2" >> }}
+ * E.g. (p = 1) [[ [x |-> Initialized] <| (t = 1) ( c@2(x) ) ]] || {{ c_{2 -> 1}<< "Hello from 2" >> }}
  */
 case class NetworkComposition(lhs: Network, rhs: Network) extends Network
 
