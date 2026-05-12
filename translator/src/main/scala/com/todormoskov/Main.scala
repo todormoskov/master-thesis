@@ -58,11 +58,10 @@ object Main {
       + specAfterEndTranslation + System.lineSeparator()
 
     Files.write(validatedArgs.input, outputSpec.getBytes(StandardCharsets.UTF_8))
+    println(s"Translation completed. Output written to ${validatedArgs.input}")
   }
 
-  private val usage = """
-               Usage: epc2tla [--input <path-to-epc-spec.tla>]
-               """
+  private val usage = "Usage: java -jar epc2tla [--input <path-to-epc-spec.tla>]"
 
   private case class Arguments(input: Path)
 
@@ -83,7 +82,7 @@ object Main {
   private def validateArgs(args: Map[String, String]): Arguments = {
     // Input is a required argument!
     if (!args.contains("input")) {
-      print(usage)
+      println(usage)
       exit(1)
     }
 
