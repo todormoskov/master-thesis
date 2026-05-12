@@ -48,7 +48,7 @@ object Analyzer {
   def analyze(tlaModule: Module): Either[String, EPCSpecContext] = {
     val epcSpecIndex = tlaModule.moduleUnits.indexWhere(_.isInstanceOf[EPCSpec])
     if epcSpecIndex == -1 then {
-      ???
+      Left(s"EPC spec not found in module ${tlaModule.identifier.name}!")
     }
     else {
       val visibleTLAOperators = mutable.LinkedHashSet.empty[String]
@@ -285,7 +285,7 @@ class ControlFlowAnalyzer {
    * we set the pointer to the first valid operation ID after the conditional thread.
    *
    * @param region
-   * @param continuationID
+   * @param successorRegion
    * @return
    */
   private def computeEdges(region: Region, successorRegion: Region): List[DiEdge] = {

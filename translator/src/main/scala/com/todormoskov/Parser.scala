@@ -335,7 +335,7 @@ sealed trait Enumerator
  *
  * E.g. (A = 1), (Q = "a"), (p \in 1..10), (q \in {"a", "b"}), ...
  */
-case class BoundedEnumerator(name: Identifier, equalOrIn: String, domain: Expression) extends Enumerator
+case class BoundedEnumerator(name: Identifier, equalOrIn: "=" | "\\in", domain: Expression) extends Enumerator
 /**
  * BoundedEnumeratorWithFilter := '(' Identifier ['=' | '\in'] Expression ':' Expression ')'
  *
@@ -543,8 +543,8 @@ class Parser(lexer: Tokenizer) {
 
   private def error(token: Token, message: String): String = {
     val lineContents = lexer.scanner.getLine(token.line)
-    s"""SyntaxError (line ${token.line}, column ${token.column}): ${message}.
-       |>>> ${lineContents}
+    s"""SyntaxError (line ${token.line}, column ${token.column}): $message.
+       |>>> $lineContents
        |>>> ${"-".repeat(token.column - 1)}^
        |""".stripMargin
   }
@@ -586,7 +586,7 @@ class Parser(lexer: Tokenizer) {
             _ <- consume(separator)
             nextObject <- consumer()
             intermediateResult <- {
-              accumulator += nextObject;
+              accumulator += nextObject
               loop(accumulator)
             }
           } yield intermediateResult
@@ -2278,7 +2278,7 @@ class Parser(lexer: Tokenizer) {
   /**
    * Parse a sequence of one or more 'LET' definitions. We stop parsing when we encounter the 'IN' token.
    */
-  def parseLetInDefinitions(): Either[String, List[OperatorDefinition | FunctionDefinition | ModuleDefinition]] = {
+  private def parseLetInDefinitions(): Either[String, List[OperatorDefinition | FunctionDefinition | ModuleDefinition]] = {
     val definitions = new ListBuffer[OperatorDefinition | FunctionDefinition | ModuleDefinition]
     // We perform a do-while loop in order to parse at least one definition.
     while {
@@ -2332,11 +2332,10 @@ class Parser(lexer: Tokenizer) {
     } do {
       (for {_ <- consume(TokenKind.AND); conjunct <- parseExpression() } yield conjunct) match {
         case Right(value) => conjuncts addOne value
-        case Left(value) => {
+        case Left(value) =>
           // If we fail to parse an expression, we also pop the top element of the stack to "clean it up".
           conjunctionStack.pop()
           return Left(value)
-        }
       }
     }
     // Pop the top element of the conjunction stack to remove the conjunction list from the stack.
@@ -2374,11 +2373,10 @@ class Parser(lexer: Tokenizer) {
     } do {
       (for {_ <- consume(TokenKind.OR); disjunct <- parseExpression()} yield disjunct) match {
         case Right(value) => disjuncts addOne value
-        case Left(value) => {
+        case Left(value) =>
           // If we fail to parse an expression, we also pop the top element of the stack to "clean it up".
           conjunctionStack.pop()
           return Left(value)
-        }
       }
     }
     // Pop the top element of the conjunction stack to remove the disjunction list from the stack.
@@ -2398,7 +2396,7 @@ class Parser(lexer: Tokenizer) {
   def parseEPCSpec(): Either[String, EPCSpec] =
     for {
       _ <- consume(TokenKind.EPC_CONTEXT_OPEN)
-      modifiers <- if (check(TokenKind.LEFT_ROUND_BRACKET)) then for {
+      modifiers <- if check(TokenKind.LEFT_ROUND_BRACKET) then for {
           _ <- consume(TokenKind.LEFT_ROUND_BRACKET)
           modifiers <- parseCommaListOfIdentifiers()
           _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
@@ -2462,7 +2460,7 @@ class Parser(lexer: Tokenizer) {
         } yield BoundedEnumeratorWithFilter(identifier, token.value, domain, guardExpr)
         else for {
           _ <- consume(TokenKind.RIGHT_ROUND_BRACKET)
-        } yield BoundedEnumerator(identifier, token.value, domain)
+        } yield BoundedEnumerator(identifier, token.value.asInstanceOf["=" | "\\in"], domain)
     } yield enumerator
 
   /**

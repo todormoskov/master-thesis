@@ -1,5 +1,5 @@
 scalaVersion := "3.7.3"
-version := "0.0.0"
+version := "0.0.1"
 name := "todormoskov"
 organization := "com.todormoskov"
 
