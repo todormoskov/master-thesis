@@ -4,24 +4,26 @@ EXTENDS Integers, Sequences, Bags
 CONSTANT input
 N == Len(input)
 
-cdr(r) == ((r - 1) % N) + 1
+Cdr(r) == ((r - 1) % N) + 1
 
-Seconds(S) == { p[2] : p \in S }
+SecondProjection(S) == { p[2] : p \in S }
 
 SetMax(S) ==  CHOOSE i \in S : \A j \in S : i >= j
 
-best(props) == LET domain == DOMAIN props
-                   maxStamp == SetMax(Seconds(domain))
-                   somebodyWithMaxStamp == CHOOSE bst \in domain : bst[2] = maxStamp
-               IN  somebodyWithMaxStamp[1]
+Best(props) == LET domain == DOMAIN props
+                   maxStamp == SetMax(SecondProjection(domain))
+                   pairWithMaxStamp == CHOOSE bst \in domain : bst[2] = maxStamp
+               IN  pairWithMaxStamp[1]
 
 CeilDiv(a, b) == a \div b + IF a % b = 0 THEN 0 ELSE 1
 
 Majority == CeilDiv(N + 1, 2)
 
-PositiveMajority(acks) == acks[TRUE] >= Majority 
+PositiveMajority(acks) == acks[TRUE] >= Majority
 
-failOK(failed, failCandidates) == Cardinality(failed \union failCandidates) <= 1
+MaxFailures == N - Majority
+
+FailOK(failed, failCandidates) == Cardinality(failed \union failCandidates) <= MaxFailures
 
 (* --EPC (FailStop, EventualWeakAccuracy, Terminating, Termination, NextWF)
          ConsensusWithDiamondS
@@ -58,31 +60,31 @@ def Coll_a(a, Acks) =
 def P1(d, r, v) =
        go: if ~d
              then inc: << r := r + 1 >>;
-              propSnd: {{ prop @ cdr(r) << <<v, s>> >> }};
+              propSnd: {{ prop @ Cdr(r) << <<v, s>> >> }};
                  p2_1: P2()
            fi
 
 def P2(r, Props) =
-     crd2: if self = cdr(r)
+     crd2: if self = Cdr(r)
              then propsRcv: if BagCardinality(Props) < Majority
                               then    p2_2: P2()
-                              else bestSnd: {{ (k \in 1..N) learn @ k << best(Props) >> }};
+                              else bestSnd: {{ (k \in 1..N) learn @ k << Best(Props) >> }};
                                       p3_c: P3()
                             fi
              else     p3_p: P3() 
            fi
 
 def P3(r, v, s) =
- learnRcv: learn@cdr(r)?(v);
-  trusted: if D[learn][cdr(r)]
-             then  ackSnd: {{ ack @ cdr(r) << TRUE  >> }}; 
+ learnRcv: learn@Cdr(r)?(v);
+  trusted: if D[learn][Cdr(r)]
+             then  ackSnd: {{ ack @ Cdr(r) << TRUE  >> }}; 
                     stamp: << s := r >>
-             else nackSnd: {{ ack @ cdr(r) << FALSE >> }}
+             else nackSnd: {{ ack @ Cdr(r) << FALSE >> }}
            fi;
   p4_init: P4()
 
 def P4(r, Acks, output, v) =
-     crd4: if self = cdr(r)
+     crd4: if self = Cdr(r)
              then acksRcv: if BagCardinality(Acks) < Majority
                              then p4_loop: P4()
                              else  enough: if PositiveMajority(Acks)
@@ -115,7 +117,7 @@ ChanSet == {prop, learn, ack, decide}
 
 SuspChanSet == {learn}
 
-suspectOK(ti, f, suspected, suspector) == suspected \notin ti
+SuspectOK(ti, f, suspect, suspector) == suspect \notin ti
 
 Init == /\ TI = {}
         /\ F = {}
@@ -225,7 +227,7 @@ propRcvSusp(self, thd) == /\ pc[self][thd] = "propRcv"
                           /\ \E k \in 1..N:
                                /\ prop \in SuspChanSet
                                /\ k \in ProcSet
-                               /\ suspectOK(TI, F, k, self)
+                               /\ SuspectOK(TI, F, k, self)
                                /\ D' = [D EXCEPT ![self][prop][k] = FALSE]
                           /\ pc' = [pc EXCEPT ![self][thd] = "upd_prop"]
                           /\ UNCHANGED <<TI, F, AE, O, ra, v, d, r, s, output, p, a, Props, Acks>>
@@ -282,7 +284,7 @@ ackRcvSusp(self, thd) == /\ pc[self][thd] = "ackRcv"
                          /\ \E k \in 1..N:
                               /\ ack \in SuspChanSet
                               /\ k \in ProcSet
-                              /\ suspectOK(TI, F, k, self)
+                              /\ SuspectOK(TI, F, k, self)
                               /\ D' = [D EXCEPT ![self][ack][k] = FALSE]
                          /\ pc' = [pc EXCEPT ![self][thd] = "upd_acks"]
                          /\ UNCHANGED <<TI, F, AE, O, ra, v, d, r, s, output, p, a, Props, Acks>>
@@ -331,8 +333,8 @@ inc(self, thd) == /\ pc[self][thd] = "inc"
 
 propSnd(self, thd) == /\ pc[self][thd] = "propSnd"
                       /\ prop \in ChanSet
-                      /\ cdr(r[self]) \in ProcSet
-                      /\ AE' = [AE EXCEPT ![prop] = AE[prop] (+) SetToBag({<<self, cdr(r[self]), <<v[self], s[self]>>>>})]
+                      /\ Cdr(r[self]) \in ProcSet
+                      /\ AE' = [AE EXCEPT ![prop] = AE[prop] (+) SetToBag({<<self, Cdr(r[self]), <<v[self], s[self]>>>>})]
                       /\ pc' = [pc EXCEPT ![self][thd] = "p2_1"]
                       /\ UNCHANGED <<TI, F, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
@@ -352,12 +354,12 @@ P1 == \E self \in ProcSet \ F:
 
 \* def P2(r, Props)
 crd2T(self, thd) == /\ pc[self][thd] = "crd2"
-                    /\ self = cdr(r[self])
+                    /\ self = Cdr(r[self])
                     /\ pc' = [pc EXCEPT ![self][thd] = "propsRcv"]
                     /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
 crd2F(self, thd) == /\ pc[self][thd] = "crd2"
-                    /\ ~(self = cdr(r[self]))
+                    /\ ~(self = Cdr(r[self]))
                     /\ pc' = [pc EXCEPT ![self][thd] = "p3_p"]
                     /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
@@ -381,7 +383,7 @@ bestSnd(self, thd) == /\ pc[self][thd] = "bestSnd"
                       /\ \E k \in 1..N \ O[self][thd]:
                            /\ learn \in ChanSet
                            /\ k \in ProcSet
-                           /\ AE' = [AE EXCEPT ![learn] = AE[learn] (+) SetToBag({<<self, k, best(Props[self])>>})]
+                           /\ AE' = [AE EXCEPT ![learn] = AE[learn] (+) SetToBag({<<self, k, Best(Props[self])>>})]
                            /\ pc' = [pc EXCEPT ![self][thd] = IF O[self][thd] \cup {k} # 1..N
                                                                 THEN pc[self][thd]
                                                                 ELSE "p3_c"]
@@ -418,10 +420,10 @@ P2 == \E self \in ProcSet \ F:
 \* def P3(r, v, s)
 learnRcvRcv(self, thd) == /\ pc[self][thd] = "learnRcv"
                           /\ learn \in ChanSet \ SuspChanSet
-                          /\ cdr(r[self]) \in ProcSet
+                          /\ Cdr(r[self]) \in ProcSet
                           /\ v[self] # Undefined
                           /\ \E msg4 \in DOMAIN AE[learn]:
-                               /\ msg4[1] = cdr(r[self])
+                               /\ msg4[1] = Cdr(r[self])
                                /\ msg4[2] = self
                                /\ v' = [v EXCEPT ![self] = msg4[3]]
                                /\ AE' = [AE EXCEPT ![learn] = AE[learn] (-) SetToBag({msg4})]
@@ -430,12 +432,12 @@ learnRcvRcv(self, thd) == /\ pc[self][thd] = "learnRcv"
 
 learnRcvRcvS(self, thd) == /\ pc[self][thd] = "learnRcv"
                            /\ learn \in SuspChanSet
-                           /\ cdr(r[self]) \in ProcSet
+                           /\ Cdr(r[self]) \in ProcSet
                            /\ v[self] # Undefined
                            /\ \E msg5 \in DOMAIN AE[learn]:
-                                /\ msg5[1] = cdr(r[self])
+                                /\ msg5[1] = Cdr(r[self])
                                 /\ msg5[2] = self
-                                /\ D' = [D EXCEPT ![self][learn][cdr(r[self])] = TRUE]
+                                /\ D' = [D EXCEPT ![self][learn][Cdr(r[self])] = TRUE]
                                 /\ v' = [v EXCEPT ![self] = msg5[3]]
                                 /\ AE' = [AE EXCEPT ![learn] = AE[learn] (-) SetToBag({msg5})]
                            /\ pc' = [pc EXCEPT ![self][thd] = "trusted"]
@@ -443,26 +445,26 @@ learnRcvRcvS(self, thd) == /\ pc[self][thd] = "learnRcv"
 
 learnRcvSusp(self, thd) == /\ pc[self][thd] = "learnRcv"
                            /\ learn \in SuspChanSet
-                           /\ cdr(r[self]) \in ProcSet
-                           /\ suspectOK(TI, F, cdr(r[self]), self)
-                           /\ D' = [D EXCEPT ![self][learn][cdr(r[self])] = FALSE]
+                           /\ Cdr(r[self]) \in ProcSet
+                           /\ SuspectOK(TI, F, Cdr(r[self]), self)
+                           /\ D' = [D EXCEPT ![self][learn][Cdr(r[self])] = FALSE]
                            /\ pc' = [pc EXCEPT ![self][thd] = "trusted"]
                            /\ UNCHANGED <<TI, F, AE, O, ra, v, d, r, s, output, p, a, Props, Acks>>
 
 trustedT(self, thd) == /\ pc[self][thd] = "trusted"
-                       /\ D[self][learn][cdr(r[self])]
+                       /\ D[self][learn][Cdr(r[self])]
                        /\ pc' = [pc EXCEPT ![self][thd] = "ackSnd"]
                        /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
 trustedF(self, thd) == /\ pc[self][thd] = "trusted"
-                       /\ ~(D[self][learn][cdr(r[self])])
+                       /\ ~(D[self][learn][Cdr(r[self])])
                        /\ pc' = [pc EXCEPT ![self][thd] = "nackSnd"]
                        /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
 ackSnd(self, thd) == /\ pc[self][thd] = "ackSnd"
                      /\ ack \in ChanSet
-                     /\ cdr(r[self]) \in ProcSet
-                     /\ AE' = [AE EXCEPT ![ack] = AE[ack] (+) SetToBag({<<self, cdr(r[self]), TRUE>>})]
+                     /\ Cdr(r[self]) \in ProcSet
+                     /\ AE' = [AE EXCEPT ![ack] = AE[ack] (+) SetToBag({<<self, Cdr(r[self]), TRUE>>})]
                      /\ pc' = [pc EXCEPT ![self][thd] = "stamp"]
                      /\ UNCHANGED <<TI, F, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
@@ -474,8 +476,8 @@ stamp(self, thd) == /\ pc[self][thd] = "stamp"
 
 nackSnd(self, thd) == /\ pc[self][thd] = "nackSnd"
                       /\ ack \in ChanSet
-                      /\ cdr(r[self]) \in ProcSet
-                      /\ AE' = [AE EXCEPT ![ack] = AE[ack] (+) SetToBag({<<self, cdr(r[self]), FALSE>>})]
+                      /\ Cdr(r[self]) \in ProcSet
+                      /\ AE' = [AE EXCEPT ![ack] = AE[ack] (+) SetToBag({<<self, Cdr(r[self]), FALSE>>})]
                       /\ pc' = [pc EXCEPT ![self][thd] = "p4_init"]
                       /\ UNCHANGED <<TI, F, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
@@ -501,12 +503,12 @@ P3 == \E self \in ProcSet \ F:
 
 \* def P4(r, Acks, output, v)
 crd4T(self, thd) == /\ pc[self][thd] = "crd4"
-                    /\ self = cdr(r[self])
+                    /\ self = Cdr(r[self])
                     /\ pc' = [pc EXCEPT ![self][thd] = "acksRcv"]
                     /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
 crd4F(self, thd) == /\ pc[self][thd] = "crd4"
-                    /\ ~(self = cdr(r[self]))
+                    /\ ~(self = Cdr(r[self]))
                     /\ pc' = [pc EXCEPT ![self][thd] = "p1_p"]
                     /\ UNCHANGED <<TI, F, AE, O, D, ra, v, d, r, s, output, p, a, Props, Acks>>
 
@@ -624,7 +626,7 @@ decRcvSusp(self, thd) == /\ pc[self][thd] = "decRcv"
                          /\ \E k \in 1..N:
                               /\ decide \in SuspChanSet
                               /\ k \in ProcSet
-                              /\ suspectOK(TI, F, k, self)
+                              /\ SuspectOK(TI, F, k, self)
                               /\ D' = [D EXCEPT ![self][decide][k] = FALSE]
                          /\ pc' = [pc EXCEPT ![self][thd] = "dec"]
                          /\ UNCHANGED <<TI, F, AE, O, ra, v, d, r, s, output, p, a, Props, Acks>>
@@ -667,7 +669,7 @@ Env == \E ti, f \in SUBSET (ProcSet \ (TI \cup F)):
          /\ ti # {}
          /\ f # {}
          /\ ti \cap f = {}
-         /\ failOK(F, f)
+         /\ FailOK(F, f)
          /\ TI' = TI \cup ti
          /\ F' = F \cup f
          /\ UNCHANGED <<AE, O, D, pc, ra, v, d, r, s, output, p, a, Props, Acks>>
@@ -699,5 +701,5 @@ Termination == <>(\A self \in ProcSet \ F:
 
 =============================================================================
 \* Modification History
-\* Last modified Sat Apr 18 12:18:29 CEST 2026 by todormoskov
+\* Last modified Tue May 12 15:43:05 CEST 2026 by todormoskov
 \* Created Tue Feb 03 17:23:17 CET 2026 by todormoskov
