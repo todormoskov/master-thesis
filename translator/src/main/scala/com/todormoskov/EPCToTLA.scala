@@ -653,9 +653,9 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       OperatorDefinition(
         NonFixLHS(Spec, Nil),
         if !epcCtx.nextWFConfigured
-        then BinaryExpression("/\\", Init, UnaryExpression("[]", WeakStuttering(Next, vars)))
+        then BinaryExpression("/\\", Init, UnaryExpression("[]", BoxAction(Next, vars)))
         else BinaryExpression("/\\",
-          BinaryExpression("/\\", Init, UnaryExpression("[]", WeakStuttering(Next, vars))),
+          BinaryExpression("/\\", Init, UnaryExpression("[]", BoxAction(Next, vars))),
           WeakFairness(vars, Next)
         )
       )
@@ -1682,8 +1682,8 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       case letInExpr: LetInExpression => rewriteFn(letInExpr)
       // The following expressions are simply returned unchanged
       case genIdentifier: GeneralIdentifier => genIdentifier
-      case ws: WeakStuttering => ws
-      case ss: StrongStuttering => ss
+      case ws: BoxAction => ws
+      case ss: DiamondAction => ss
       case wf: WeakFairness => wf
       case sf: StrongFairness => sf
       case at: AtSign => at
@@ -1915,8 +1915,8 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
         LetInExpression(updatedDefinitions, renamedExpr)
       // The following expressions are simply returned unchanged
       case genIdentifier: GeneralIdentifier => genIdentifier
-      case ws: WeakStuttering => ws
-      case ss: StrongStuttering => ss
+      case ws: BoxAction => ws
+      case ss: DiamondAction => ss
       case wf: WeakFairness => wf
       case sf: StrongFairness => sf
       case at: AtSign => at

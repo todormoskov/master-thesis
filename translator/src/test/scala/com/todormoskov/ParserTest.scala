@@ -1761,13 +1761,13 @@ class ParserTest extends AnyFunSuite {
   }
 
 
-  test("Parses weak-stuttering nodes") {
+  test("Parses box action nodes") {
     val inputSpec =
       """[x' = x + 1]_x""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
     assert(ast ==
-      WeakStuttering(
+      BoxAction(
         BinaryExpression(
           "=",
           PrimedExpression(Identifier("x")),
@@ -1782,13 +1782,13 @@ class ParserTest extends AnyFunSuite {
     )
   }
 
-  test("Parses strong-stuttering nodes") {
+  test("Parses diamond action nodes") {
     val inputSpec =
       """<< x' = f(x) >>_x""".stripMargin
 
     val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseExpression().toOption.get
     assert(ast ==
-      StrongStuttering(
+      DiamondAction(
         BinaryExpression(
           "=",
           PrimedExpression(Identifier("x")),
@@ -2016,7 +2016,7 @@ class ParserTest extends AnyFunSuite {
                   Identifier("Init"),
                   UnaryExpression(
                     "[]",
-                    WeakStuttering(
+                    BoxAction(
                       Identifier("Next"),
                       Tuple(
                         List(

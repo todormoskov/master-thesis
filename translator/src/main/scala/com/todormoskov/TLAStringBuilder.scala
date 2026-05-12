@@ -346,12 +346,12 @@ class TLAStringBuilder {
           if (idx != clauses.length - 1) appendString(",")
         }
         appendString("]")
-      case WeakStuttering(action, state) =>
+      case BoxAction(action, state) =>
         appendString("[")
         appendExpression(action)
         appendString("]_")
         appendExpression(state)
-      case StrongStuttering(action, state) =>
+      case DiamondAction(action, state) =>
         appendString("<<")
         appendExpression(action)
         appendString(">>_")

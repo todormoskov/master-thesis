@@ -295,19 +295,19 @@ case class ExceptClause(selector: SelectorPath, value: Expression) extends AST
 case class ExceptExpression(exceptTarget: Expression, clauses: List[ExceptClause]) extends Function
 
 /**
- * Weak stuttering expression. E.g. [A]_e
+ * "Box action" expression. E.g. [A]_e
  */
-case class WeakStuttering(action: Expression, state: Expression) extends Expression
+case class BoxAction(action: Expression, state: Expression) extends Expression
 /**
- * Strong stuttering expression. E.g. <<A>>_e
+ * "Diamond action" expression. E.g. <<A>>_e
  */
-case class StrongStuttering(action: Expression, state: Expression) extends Expression
+case class DiamondAction(action: Expression, state: Expression) extends Expression
 /**
  * Weak fairness expression. E.g. WF_v(A)
  */
 case class WeakFairness(state: Expression, action: Expression) extends Expression
 /**
- * Strong stuttering node. E.g. SF_v(A)
+ * Strong fairness node. E.g. SF_v(A)
  */
 case class StrongFairness(state: Expression, action: Expression) extends Expression
 /**
@@ -1559,9 +1559,9 @@ class Parser(lexer: Tokenizer) {
     else if check(TokenKind.LEFT_CURLY_BRACKET)
       then for set <- parseSet() yield set
     else if check(TokenKind.LEFT_SQUARE_BRACKET)
-      then for function <- parseFunctionOrWeakStuttering() yield function
+      then for function <- parseFunctionOrBoxAction() yield function
     else if check(TokenKind.LEFT_ANGLE_BRACKET)
-      then for tuple <- parseTupleOrStrongStuttering() yield tuple
+      then for tuple <- parseTupleOrDiamondAction() yield tuple
     else if check(TokenKind.LEFT_ROUND_BRACKET)
       then for parenExpression <- parseParenthesizedExpression() yield parenExpression
     else if check(List(TokenKind.WF, TokenKind.UNDERSCORE)) || check(List(TokenKind.SF, TokenKind.UNDERSCORE))
@@ -1958,7 +1958,7 @@ class Parser(lexer: Tokenizer) {
    *
    * @return The function as an AST-Node.
    */
-  private def parseFunctionOrWeakStuttering(): Either[String, Expression] =
+  private def parseFunctionOrBoxAction(): Either[String, Expression] =
     for {
       _ <- consume(TokenKind.LEFT_SQUARE_BRACKET)
       functionOrSetOfFunctions <- {
@@ -1979,7 +1979,7 @@ class Parser(lexer: Tokenizer) {
           // we see the `->`, `EXCEPT`, `|->` or `:` symbol after
           // the first expression.
           //
-          // Additionally, we parse here weak stuttering nodes, such as [A]_e.
+          // Additionally, we parse here box action nodes, such as [A]_e.
           firstExpression <- parseExpression()
           result <- {
             // If we encounter `->`, we know that this is the set of
@@ -1998,7 +1998,7 @@ class Parser(lexer: Tokenizer) {
               _ <- consume(TokenKind.RIGHT_SQUARE_BRACKET)
               _ <- consume(TokenKind.UNDERSCORE)
               stateExpression <- parsePrimaryExpression()
-            } yield WeakStuttering(firstExpression, stateExpression)
+            } yield BoxAction(firstExpression, stateExpression)
             // Here we have 2 more cases:
             // 1) The set of all records with specific keys and their domains
             //    (e.g. [foo: {"FOO"}, bar: {"BAR"}] )
@@ -2133,15 +2133,15 @@ class Parser(lexer: Tokenizer) {
     } yield IndexSelector(indices)
 
   /**
-   * Parse a TLA+ list (aka. a tuple) or a strong stuttering node (e.g. <<A>>_e).
+   * Parse a TLA+ list (aka. a tuple) or a diamond action node (e.g. <<A>>_e).
    *
    * Tuple := '<<' CommaList(Expression) '>>'
    *
-   * StrongStuttering := '<<' Expression '>>' '_' Expression
+   * DiamondAction := '<<' Expression '>>' '_' Expression
    *
    * @return The tuple as an AST node with its elements.
    */
-  private def parseTupleOrStrongStuttering(): Either[String, Expression] =
+  private def parseTupleOrDiamondAction(): Either[String, Expression] =
     for {
       _ <- consume(TokenKind.LEFT_ANGLE_BRACKET)
       result <- {
@@ -2154,7 +2154,7 @@ class Parser(lexer: Tokenizer) {
             _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
             _ <- consume(TokenKind.UNDERSCORE)
             stateExpression <- parseExpression()
-          } yield StrongStuttering(firstExpression, stateExpression)
+          } yield DiamondAction(firstExpression, stateExpression)
           else if check(TokenKind.RIGHT_ANGLE_BRACKET) then for {
             _ <- consume(TokenKind.RIGHT_ANGLE_BRACKET)
           } yield Tuple(List(firstExpression))
