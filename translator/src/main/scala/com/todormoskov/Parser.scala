@@ -539,7 +539,7 @@ class Parser(lexer: Tokenizer) {
   def consume(expected: TokenKind) : Either[String, Token] =
     if check(expected)
       then Right(lexer.consume())
-      else Left(error(s"token of kind $expected not found"))
+      else Left(error(s"expected ${expected.display}, but found ${lexer.peek().asInstanceOf[Token].kind.display}"))
 
   private def error(token: Token, message: String): String = {
     val lineContents = lexer.scanner.getLine(token.line)
@@ -2730,7 +2730,7 @@ class Parser(lexer: Tokenizer) {
       case Token(TokenKind.EPC_IF, _, _, _) => parseConditionalThread()
       // skip elements
       case Token(TokenKind.EPC_SKIP, _, _, _) => parseSkip()
-      case _ => Left(error("EPC command expected"))
+      case _ => Left(error("EPC action expected"))
     }
 
   /**
@@ -2828,12 +2828,12 @@ class Parser(lexer: Tokenizer) {
       }
       val repeatCondition = check(TokenKind.SEMICOLON)
       if (!repeatCondition && checkThreadUnitFirstSet()) {
-        return Left(error("sequencing operator ';' not found before next command"))
+        return Left(error("sequencing operator ';' not found before next action"))
       }
       if (repeatCondition) {
         consume(TokenKind.SEMICOLON) match {
           case Right(token) if !checkThreadUnitFirstSet() =>
-            return Left(error(token, "sequencing operator ';' not followed by a command"))
+            return Left(error(token, "sequencing operator ';' not followed by an action"))
           case _ =>
         }
       }
@@ -2880,8 +2880,8 @@ class Parser(lexer: Tokenizer) {
   /**
    * ThreadDefinition := 'def' Identifier [ '(' CommaList(Identifier) ')' ] ? '=' Thread
    *
-   * E.g. def declareXAndStop = var x. 0
-   *      def assignXAndStop(x) = << x := 10 >> . 0
+   * E.g. def declareXAndStop = var x
+   *      def assignXAndStop(x) = << x := 10 >>
    */
   def parseThreadDefinition(): Either[String, ThreadDefinition] =
     for {
@@ -2911,7 +2911,7 @@ class Parser(lexer: Tokenizer) {
    *
    * NetworkComposition := Network '||' Network
    *
-   * E.g. (p = 1) [[ [x |-> Initialized] <| c@2(x) . 0 ]] || {{ c_{2 -> 1}<< "Hello from 2" >> }}
+   * E.g. (p = 1) [[ [x |-> Initialized] <| c@2(x) ]] || {{ c_{2 -> 1}<< "Hello from 2" >> }}
    */
   private def parseNetworkComposition(): Either[String, Network] =
     for {
@@ -2959,8 +2959,8 @@ class Parser(lexer: Tokenizer) {
    * Location := Enumerator Process
    *
    * Examples:
-   * (p = 1) [[ [x |-> Undefined] |> var x. << x := 10 >>. 0 ]]
-   * (p \in 1..10) [[ [x |-> Undefined] |> var x. << x := 10 >>. 0 ]]
+   * (p = 1) [[ [x |-> Undefined] |> var x; << x := 10 >> ]]
+   * (p \in 1..10) [[ [x |-> Undefined] |> var x; << x := 10 >> ]]
    */
   private def parseLocation(): Either[String, Location] =
     for {
@@ -2973,7 +2973,7 @@ class Parser(lexer: Tokenizer) {
    *
    * Process := '[[' ExplicitFunction '<|' Thread ']]'
    *
-   * E.g. [[ [x |-> Undefined] <| var x. << x := 10 >> . 0 ]]
+   * E.g. [[ [x |-> Undefined] <| var x; << x := 10 >> ]]
    */
   def parseProcess(): Either[String, Process] =
     for {

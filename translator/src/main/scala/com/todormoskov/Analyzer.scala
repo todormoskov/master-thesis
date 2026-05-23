@@ -167,6 +167,7 @@ object Analyzer {
       // so we start generating the IDs from 1 for each thread.
       val threadDefinitionsAsOperations = threadDefBodies.map((identifier, thread) => (identifier, ControlFlowAnalyzer().computeCfg(thread)))
 
+      // We check if there are any multi-send actions ==> If yes, we set specWithMultiSends to true.
       def anySendOfMultipleMessages(region: Region): Boolean = {
         def isSendOfMultipleMessages(operation: Operation): Boolean = operation match {
           case LeafOperation(_, _, command) => command match {
@@ -181,6 +182,31 @@ object Analyzer {
       }
       var specWithMultiSends = locThdEnumsToOperations.exists((_, thdCfg) => anySendOfMultipleMessages(thdCfg._1))
       specWithMultiSends = specWithMultiSends | threadDefinitionsAsOperations.exists((_, thdCfg) => anySendOfMultipleMessages(thdCfg._1))
+
+      // We check if there are instantiations of undefined threads.
+      // If yes, we return an error message since these cannot be translated correctly!
+      def anyInstantiationOfUndefinedThread(region: Region): Option[Operation] = {
+        def maybeInstantiationOfUndefinedThread(operation: Operation): Option[Operation] = operation match {
+          case leafOperation@LeafOperation(_, _, command) => command match {
+            case ThreadInstantiation(threadIdentifier) if !threadDefinitionsAsOperations.contains(threadIdentifier) => Some(leafOperation)
+            case _ => None
+          }
+          case IfOperation(_, _, _, thenRegion, elseRegion) => anyInstantiationOfUndefinedThread(thenRegion ++ elseRegion)
+          case ChoiceOperation(_, _, _) => None
+        }
+        region.flatMap(maybeInstantiationOfUndefinedThread).headOption
+      }
+      val maybeUndefinedThreadInstantiation = (
+          locThdEnumsToOperations.flatMap((_, thdCfg) => anyInstantiationOfUndefinedThread(thdCfg._1))
+          ++ threadDefinitionsAsOperations.flatMap((_, thdCfg) => anyInstantiationOfUndefinedThread(thdCfg._1))
+        ).headOption
+      if maybeUndefinedThreadInstantiation.nonEmpty then {
+        val faultyOperation = maybeUndefinedThreadInstantiation.head.asInstanceOf[LeafOperation]
+        val faultyInstantiation = faultyOperation.command.asInstanceOf[ThreadInstantiation]
+        val message = s"SemanticError: Instantiation of undefined thread '${faultyInstantiation.thread.name}'"
+        val errorLocation = faultyOperation.label.map(label => s" at action with flag '${label.name}'").getOrElse("")
+        return Left(message + errorLocation)
+      }
 
       // The result of the the analyze()-method is an EpcSpecContext-object with the gathered information, wrapped in an Either container.
       Right(EPCSpecContext(
