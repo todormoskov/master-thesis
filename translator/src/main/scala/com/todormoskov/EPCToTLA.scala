@@ -933,7 +933,9 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
             val definedThreadEntryOperation = getDefinedThreadEntryOperation(epcCtx.thdDefinitionsToOperations(identifier))
             val threadEntryOperationLabel = getSuccessorLabel(None, None, Some(identifier), definedThreadEntryOperation)
             val freeVariables = epcCtx.thdDefinitionsToFreeVariables(identifier)
-            List(
+            Nil
+            // Default-Case for thread instantiations.
+            ++ Option.when(definedThreadEntryOperation.isDefined)(
               OperatorDefinition(NonFixLHS(Identifier(currentLabel), List(self, thd)), ConjunctionList(
                 List(pcEnablingCondition)
                   ++ generateThreadInstantiationPreconditions(freeVariables, locationVariables, successorLabel)
@@ -945,6 +947,23 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
                   ++ Option.when(successorLabel == DONE) (UnchangedExpr(getUnchangedVars(allTLAVariables, List(pc))))
               ))
             )
+            // One edge case is when the instantiation will move to flag "Done".
+            // This can happen, when the defined thread contains only skip tokens or only empty send actions.
+            // If we encounter this case (when definedThreadEntryOperation.isEmpty),
+            // we simply jump to the next action in the current region with the instantiation.
+            // Then, it might also be the case that this is the last action in a defined thread
+            // ==> We check if there is a "return address" in the ra stack and jump eventually to it.
+            ++ Option.when(definedThreadEntryOperation.isEmpty)(
+              OperatorDefinition(NonFixLHS(Identifier(currentLabel), List(self, thd)), ConjunctionList(
+                List(pcEnablingCondition)
+                  ++ generateThreadInstantiationPreconditions(freeVariables, locationVariables, successorLabel)
+                  ++ pcUpdateUnlessOnThreadExit
+                  ++ pcUpdateOnThreadExit
+                  ++ raUpdateOnThreadExit
+                  ++ Some(UnchangedExpr(getUnchangedVars(allTLAVariables, List(pc, raOnThreadExit))))
+              ))
+            )
+
           // This is only to remove the compiler warning, conditional threads are turned into IfOperations in the analysis phase!
           case ConditionalThread(_, _, _) => Nil
           // This is only to remove the compiler warning, choices are turned into ChoiceOperations in the analysis phase!
