@@ -11,7 +11,7 @@ The repository contains two top-level directories:
 
 ## Project setup
 
-This is a Scala 3 project built with sbt. It can be imported directly into most Scala-aware code editors, including IntelliJ IDEA and VS Code with the Scala extensions installed.
+The `translator/` directory contains a Scala 3 project built with sbt. It can be imported directly into most Scala-aware code editors, including IntelliJ IDEA and VS Code with the Scala extensions installed.
 
 ### Importing into an editor
 
