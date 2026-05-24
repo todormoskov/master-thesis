@@ -343,17 +343,17 @@ case class BoundedEnumerator(name: Identifier, equalOrIn: "=" | "\\in", domain: 
  */
 case class BoundedEnumeratorWithFilter(name: Identifier, equalOrIn: String, domain: Expression, filter: Expression) extends Enumerator
 /**
- * ChannelDefinition := 'chan' Identifier
+ * ChannelDeclaration := 'chan' Identifier
  *
  * E.g. chan c
  */
-case class ChannelDefinition(identifiers: List[Identifier]) extends EPCSpecUnit
+case class ChannelDeclaration(identifiers: List[Identifier]) extends EPCSpecUnit
 /**
- * SuspiciousChannelDefinition := 'suspchan' CommaList(Identifier)
+ * SuspiciousChannelDeclaration := 'suspchan' CommaList(Identifier)
  *
  * E.g. suspchan c1, c2
  */
-case class SuspiciousChannelDefinition(identifiers: List[Identifier]) extends EPCSpecUnit
+case class SuspiciousChannelDeclaration(identifiers: List[Identifier]) extends EPCSpecUnit
 /**
  * TravellingMessage := Identifier '_' '{' Literal '->' Literal '}' '<<' Expression '>>'
  *
@@ -2410,12 +2410,12 @@ class Parser(lexer: Tokenizer) {
   /**
    * Parse a single EPC specification unit.
    *
-   * EPCSpecUnit := ChannelDefinition | SuspiciousChannelDefinition | ThreadDefinition | Network
+   * EPCSpecUnit := ChannelDeclaration | SuspiciousChannelDeclaration | ThreadDefinition | Network
    */
   private def parseEPCSpecUnit(): Either[String, EPCSpecUnit] =
     lexer.peek() match {
-      case Token(TokenKind.EPC_CHAN, _, _, _) => parseChannelDefinition()
-      case Token(TokenKind.EPC_SUSPCHAN, _, _, _) => parseSuspiciousChannelDefinition()
+      case Token(TokenKind.EPC_CHAN, _, _, _) => parseChannelDeclaration()
+      case Token(TokenKind.EPC_SUSPCHAN, _, _, _) => parseSuspiciousChannelDeclaration()
       case Token(TokenKind.EPC_DEF, _, _, _) => parseThreadDefinition()
       case _ => parseNetwork()
     }
@@ -2464,30 +2464,30 @@ class Parser(lexer: Tokenizer) {
     } yield enumerator
 
   /**
-   * Parse a channel definition.
+   * Parse a channel declaration.
    *
-   * ChannelDefinition := 'new' Identifier
+   * ChannelDeclaration := 'new' Identifier
    *
    * E.g. new c
    */
-  def parseChannelDefinition(): Either[String, ChannelDefinition] =
+  def parseChannelDeclaration(): Either[String, ChannelDeclaration] =
     for {
       _ <- consume(TokenKind.EPC_CHAN)
       identifiers <- parseCommaListOfIdentifiers()
-    } yield ChannelDefinition(identifiers)
+    } yield ChannelDeclaration(identifiers)
 
   /**
-   * Parse a suspicious channel definition.
+   * Parse a suspicious channel declaration.
    *
-   * SuspiciousChannelDefinition := 'suspchan' CommaList(Identifier)
+   * SuspiciousChannelDeclaration := 'suspchan' CommaList(Identifier)
    *
    * E.g. suspchan c1, c2
    */
-  def parseSuspiciousChannelDefinition(): Either[String, SuspiciousChannelDefinition] =
+  def parseSuspiciousChannelDeclaration(): Either[String, SuspiciousChannelDeclaration] =
     for {
       _ <- consume(TokenKind.EPC_SUSPCHAN)
       identifiers <- parseCommaListOfIdentifiers()
-    } yield SuspiciousChannelDefinition(identifiers)
+    } yield SuspiciousChannelDeclaration(identifiers)
 
   /**
    * Parse a travelling message.

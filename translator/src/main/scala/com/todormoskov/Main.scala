@@ -39,7 +39,7 @@ object Main {
     // Replace non-breaking spaces in the spec, because they are not handled by the parser.
     specBeforeBeginTranslation = specBeforeBeginTranslation.replace('\u00A0', ' ').replace('\u2007', ' ').replace('\u202F', ' ')
     specAfterEndTranslation = specAfterEndTranslation.replace('\u00A0', ' ').replace('\u2007', ' ').replace('\u202F', ' ')
-    // Get all lines after the last equals separator (i.e. '===='[=]*), so that the compiler sees a complete TLA+ module.
+    // Get all lines after the last equals-separator (i.e. '===='[=]*), so that the compiler sees a complete TLA+ module.
     var endOfModule = inputLines.drop(endOfModuleLine).mkString(System.lineSeparator())
 
     val scanner = Scanner(specBeforeBeginTranslation + System.lineSeparator() + endOfModule)

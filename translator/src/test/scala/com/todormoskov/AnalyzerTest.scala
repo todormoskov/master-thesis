@@ -35,7 +35,7 @@ class AnalyzerTest extends AnyFunSuite {
     }
   }
 
-  test("Analyzer finds all defined channels") {
+  test("Analyzer finds all declared channels") {
     val inputSpec =
       """
         | ---- MODULE TlaModuleWithEPCSpec ----

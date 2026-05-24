@@ -90,10 +90,10 @@ object Analyzer {
         else map addOne key -> ListBuffer(value)
 
       def visitEPCSpecUnit(ast: EPCSpecUnit): Unit = ast match {
-        case ChannelDefinition(identifiers) =>
+        case ChannelDeclaration(identifiers) =>
           // Add the channels to the channels set
           channels ++= identifiers
-        case SuspiciousChannelDefinition(identifiers) =>
+        case SuspiciousChannelDeclaration(identifiers) =>
           // Add the suspicious channels to both sets ChanSet and SuspChanSet
           channels ++= identifiers
           suspiciousChannels ++= identifiers
@@ -145,7 +145,7 @@ object Analyzer {
       }
 
       // Start the recursive visit of all EPC spec units.
-      // This gathers information about the defined channels, locations (with their variables and their threads), and the defined threads.
+      // This gathers information about the declared channels, locations (with their variables and their threads), and the defined threads.
       val epcSpec = tlaModule.moduleUnits(epcSpecIndex).asInstanceOf[EPCSpec]
       val modifiers = epcSpec.modifiers.map(_.name).toSet
       epcSpec.specUnits.foreach(visitEPCSpecUnit)

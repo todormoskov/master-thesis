@@ -1274,7 +1274,7 @@ class LexerTest extends AnyFunSuite {
     )
   }
 
-  test("Recognizes EPC channel definitions") {
+  test("Recognizes EPC channel declarations") {
     val inputSpec =
       """chan c""".stripMargin
 
@@ -1288,7 +1288,7 @@ class LexerTest extends AnyFunSuite {
     )
   }
 
-  test("Recognizes EPC suspicious channel definitions") {
+  test("Recognizes EPC suspicious channel declarations") {
     val inputSpec =
       """suspchan c""".stripMargin
 

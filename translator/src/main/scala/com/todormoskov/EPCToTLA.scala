@@ -101,7 +101,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
    * Entry method for the translation of the EPC spec to TLA+.
    */
   def translateSpec(): TLAStringBuilder = {
-    // We check if there are defined channels, if yes, we need to generate the channel names as constants!
+    // We check if there are declared channels, if yes, we need to generate the channel names as constants!
     val declaredChannels = epcCtx.channels.toList
     val declaredSuspiciousChannels = epcCtx.suspiciousChannels.toList
 
@@ -156,7 +156,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
           CaseArm(BinaryExpression(locEnum.equalOrIn, self, locEnum.domain), expression) ).toList, None)))
     tlaStringBuilder.appendUnit(threadSetDefinition, newlines = 2)
 
-    // Add the ChanSet operator when there are defined channels
+    // Add the ChanSet operator when there are declared channels
     // ChanSet == {c1, c2, ...}
     val chanSetOption = Option.when(declaredChannels.nonEmpty)(
       OperatorDefinition(NonFixLHS(ChanSet, Nil), ExplicitSet(declaredChannels))
@@ -166,7 +166,7 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
       tlaStringBuilder.appendNewline()
     )
 
-    // Add the SuspChanSet operator when there are defined suspicious channels
+    // Add the SuspChanSet operator when there are declared suspicious channels
     // SuspChanSet == {c1, c2, ...}
     val suspChanSetOption = Option.when(declaredSuspiciousChannels.nonEmpty)(
       OperatorDefinition(NonFixLHS(SuspChanSet, Nil), ExplicitSet(declaredSuspiciousChannels))
@@ -350,11 +350,11 @@ class EPCToTLA(epcCtx: EPCSpecContext) {
   }
 
   /**
-   * Generates state predicates for the initial states of the defined channels. Each channel declaration
+   * Generates state predicates for the initial states of the declared channels. Each channel declaration
    * (e.g. "chan c1", "suspchan c2"), is translated as a TLA+ constant (with the same name as the channel).
    * The message aether is represented as a TLA+ variable AE that maps each channel to a bag/multiset
    * of the travelling messages, sent on that channel. Each travelling message in these bags is triple of
-   * the form << sender, receiver, payload >>. A simple top-level definition "chan c" will lead to the initial
+   * the form << sender, receiver, payload >>. A simple top-level declaration "chan c" will lead to the initial
    * mapping "c = EmptyBag". However, since location networks can also be composed with a message aether (which
    * is a multiset of travelling messages), the initial state of those channels can also be changed in that way.
    * To account for these changes, each message eather in the network, that contains messages for a channel,

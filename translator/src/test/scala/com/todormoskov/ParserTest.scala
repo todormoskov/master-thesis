@@ -2129,23 +2129,23 @@ class ParserTest extends AnyFunSuite {
     )
   }
 
-  test("Parses channel definitions") {
+  test("Parses channel declaration") {
     val inputSpec =
       """chan c1, c2""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseChannelDefinition().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseChannelDeclaration().toOption.get
     assert(ast ==
-      ChannelDefinition(List(Identifier("c1"), Identifier("c2")))
+      ChannelDeclaration(List(Identifier("c1"), Identifier("c2")))
     )
   }
 
-  test("Parses suspicious channel definitions") {
+  test("Parses suspicious channel declaration") {
     val inputSpec =
       """suspchan c1, c2""".stripMargin
 
-    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseSuspiciousChannelDefinition().toOption.get
+    val ast = new Parser(Tokenizer(Scanner(inputSpec))).parseSuspiciousChannelDeclaration().toOption.get
     assert(ast ==
-      SuspiciousChannelDefinition(List(Identifier("c1"), Identifier("c2")))
+      SuspiciousChannelDeclaration(List(Identifier("c1"), Identifier("c2")))
     )
   }
 
@@ -3059,7 +3059,7 @@ class ParserTest extends AnyFunSuite {
           Identifier("Consensus"),
           Nil,
           List(
-            ChannelDefinition(
+            ChannelDeclaration(
               List(Identifier("c"))
             ),
             Location(
