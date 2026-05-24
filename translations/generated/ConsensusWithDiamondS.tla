@@ -666,8 +666,7 @@ Dec == \E self \in ProcSet \ F:
            \/ respread(self, thd)
 
 Env == \E ti, f \in SUBSET (ProcSet \ (TI \cup F)):
-         /\ ti # {}
-         /\ f # {}
+         /\ ti # {} \/ f # {}
          /\ ti \cap f = {}
          /\ FailOK(F, f)
          /\ TI' = TI \cup ti
@@ -701,5 +700,5 @@ Termination == <>(\A self \in ProcSet \ F:
 
 =============================================================================
 \* Modification History
-\* Last modified Tue May 12 15:43:05 CEST 2026 by todormoskov
+\* Last modified Sun May 24 11:09:49 CEST 2026 by todormoskov
 \* Created Tue Feb 03 17:23:17 CET 2026 by todormoskov
