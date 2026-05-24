@@ -27,6 +27,8 @@ object Main {
     // And the start and end lines of its translation.
     val beginTranslationLine = inputLines.zipWithIndex.indexWhere((line, idx) => line.startsWith(BEGIN_TRANSLATION) && idx > epcEndLine)
     val endTranslationLine = inputLines.zipWithIndex.indexWhere((line, idx) => line.startsWith(END_TRANSLATION) && idx > beginTranslationLine)
+    // Get the line with the last equals-separator (i.e. '===='[=]*).
+    val endOfModuleLine = inputLines.zipWithIndex.lastIndexWhere((line, idx) => line.startsWith("===="))
 
     var specBeforeBeginTranslation = if beginTranslationLine != -1 && endTranslationLine != -1
       then inputLines.take(beginTranslationLine).mkString(System.lineSeparator())
@@ -37,8 +39,10 @@ object Main {
     // Replace non-breaking spaces in the spec, because they are not handled by the parser.
     specBeforeBeginTranslation = specBeforeBeginTranslation.replace('\u00A0', ' ').replace('\u2007', ' ').replace('\u202F', ' ')
     specAfterEndTranslation = specAfterEndTranslation.replace('\u00A0', ' ').replace('\u2007', ' ').replace('\u202F', ' ')
+    // Get all lines after the last equals separator (i.e. '===='[=]*), so that the compiler sees a complete TLA+ module.
+    var endOfModule = inputLines.drop(endOfModuleLine).mkString(System.lineSeparator())
 
-    val scanner = Scanner(specBeforeBeginTranslation + System.lineSeparator() + specAfterEndTranslation)
+    val scanner = Scanner(specBeforeBeginTranslation + System.lineSeparator() + endOfModule)
     val tokenizer = Tokenizer(scanner)
     val parser = Parser(tokenizer)
     val translationResult = for {
